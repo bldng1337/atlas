@@ -44,6 +44,7 @@ proportion_empty_prompts = 0.2
 streaming = False
 mixed_precision = "bf16"  # Use "fp16" for older GPUs, "bf16" for A100/H100
 seed = 42
+xformer = True
 
 
 def parse_args():
@@ -116,7 +117,8 @@ def main():
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     unet.requires_grad_(False)
-    unet.enable_xformers_memory_efficient_attention()
+    if xformer:
+        unet.enable_xformers_memory_efficient_attention()
 
     # if gradient_checkpointing:
     #     unet.enable_gradient_checkpointing()
