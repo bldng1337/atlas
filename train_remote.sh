@@ -7,7 +7,7 @@ uv run accelerate launch --mixed_precision="bf16" train_t2i.py \
     --train_batch_size 8 \
     --gradient_accumulation_steps 2 \
     --learning_rate 1e-5 \
-    --lr_warmup_steps 500 \
+    --lr_warmup_steps 700 \
     --max_train_steps 20000 \
     --checkpointing_steps 1000 \
     --mixed_precision "bf16" \
