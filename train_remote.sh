@@ -1,4 +1,4 @@
-nohup tensorboard --logdir ./logs --port 8888 --bind_all &
+nohup uv run tensorboard --logdir ./logs --port 8888 --bind_all &
 
 uv run accelerate launch --mixed_precision="bf16" train_t2i.py \
     --dataset_path "bldng/atlas" \
