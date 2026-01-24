@@ -14,5 +14,5 @@ uv run accelerate launch --mixed_precision="bf16" train_t2i.py \
     --use_8bitadam True \
     --gradient_checkpointing True \
     --num_workers 0 \
-    --xformers False \
+    --xformer False \
     --seed 42
