@@ -12,7 +12,6 @@ apt-get update && apt-get install -y \
 echo "Installing UV..."
 
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.cargo/env
 
 echo "Installing project dependencies..."
 
