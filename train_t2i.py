@@ -34,6 +34,7 @@ lr_num_cycles = 1
 lr_power = 1.0
 scheduler_type = "LINEAR"
 max_grad_norm = 1.0
+num_workers = 4
 set_grads_to_none = True
 project_dir = "./outputs"
 logging_dir = "./logs"
@@ -180,7 +181,7 @@ def main():
         train_dataset,  # ty:ignore[invalid-argument-type] # type: ignore
         batch_size=train_batch_size,
         drop_last=True,
-        num_workers=4,
+        num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=True,
     )
