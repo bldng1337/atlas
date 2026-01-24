@@ -17,6 +17,7 @@ $params = @(
     "--num_workers", "1",                      # Windows handles high worker counts poorly; 4 is safe
     "--seed", "42",
     "--streaming", "True"
+    "--validation_steps", "1"
 )
 
 # Launch using accelerate

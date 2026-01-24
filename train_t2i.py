@@ -2,6 +2,7 @@ import functools
 import os
 import sys
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from accelerate import Accelerator
@@ -11,6 +12,7 @@ from datasets import load_dataset
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.optimization import SchedulerType, get_scheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from diffusers.utils.torch_utils import randn_tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -40,11 +42,147 @@ project_dir = "./outputs"
 logging_dir = "./logs"
 output_dir = "./outputs/checkpoints"
 checkpointing_steps = 1000
+validation_steps = 1000
 proportion_empty_prompts = 0.2
 streaming = False
 mixed_precision = "bf16"  # Use "fp16" for older GPUs, "bf16" for A100/H100
 seed = 42
 xformer = True
+
+
+def log_validation(
+    unet,
+    adapter,
+    vae,
+    text_encoder,
+    tokenizer,
+    scheduler,
+    accelerator,
+    feature_map,
+    weight_dtype,
+    height,
+    width,
+    step,
+):
+    logger = get_logger(__name__)
+    logger.info("Running validation...")
+
+    unet.eval()
+    adapter.eval()
+    vae.eval()
+    text_encoder.eval()
+
+    with torch.no_grad():
+        feature_map = feature_map[:1].to(device=accelerator.device, dtype=weight_dtype)
+        prompt = "rain forests and mountains in Philippines in November"
+
+        text_input = tokenizer(
+            prompt,
+            padding="max_length",
+            max_length=tokenizer.model_max_length,
+            truncation=True,
+            return_tensors="pt",
+        )
+        prompt_embeds = text_encoder(
+            text_input.input_ids.to(accelerator.device),
+        )[0]
+
+        negative_prompt = ""
+        uncond_input = tokenizer(
+            negative_prompt,
+            padding="max_length",
+            max_length=tokenizer.model_max_length,
+            truncation=True,
+            return_tensors="pt",
+        )
+        negative_prompt_embeds = text_encoder(
+            uncond_input.input_ids.to(accelerator.device),
+        )[0]
+
+        prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
+        prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
+
+        vae_scale_factor = 2 ** (len(vae.config["block_out_channels"]) - 1)
+
+        val_scheduler = DDIMScheduler.from_config(scheduler.config)
+        val_scheduler.set_timesteps(50, device=accelerator.device)
+
+        latents = randn_tensor(
+            (
+                1,
+                unet.config["in_channels"] * 2,
+                int(height) // vae_scale_factor,
+                int(width) // vae_scale_factor,
+            ),
+            generator=None,
+            device=accelerator.device,
+            dtype=weight_dtype,
+        )
+        latents = latents * val_scheduler.init_noise_sigma
+
+        adapter_features = adapter(feature_map)
+        adapter_features = [torch.cat([s] * 2, dim=0) for s in adapter_features]
+
+        for t in tqdm(val_scheduler.timesteps, desc="Validation"):
+            latent_model_input = torch.cat([latents] * 2)
+            latent_model_input = val_scheduler.scale_model_input(latent_model_input, t)
+
+            noise_pred = unet(
+                latent_model_input,
+                t,
+                encoder_hidden_states=prompt_embeds,
+                down_intrablock_additional_residuals=[
+                    sample.to(dtype=weight_dtype) for sample in adapter_features
+                ],
+            ).sample
+
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            guidance_scale = 7.5
+            noise_pred = noise_pred_uncond + guidance_scale * (
+                noise_pred_text - noise_pred_uncond
+            )
+
+            latents = val_scheduler.step(noise_pred, t, latents).prev_sample
+
+        img_latents = latents[:, :4]
+        dem_latents = latents[:, 4:]
+
+        img_latents = img_latents / vae.config["scaling_factor"]
+        dem_latents = dem_latents / vae.config["scaling_factor"]
+
+        image = vae.decode(img_latents.float(), return_dict=False)[0]
+        dem = vae.decode(dem_latents.float(), return_dict=False)[0]
+
+        image = (image / 2 + 0.5).clamp(0, 1)
+        dem = (dem / 2 + 0.5).clamp(0, 1)
+
+        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        dem = dem.cpu().permute(0, 2, 3, 1).float().numpy()
+
+        if accelerator.is_main_process:
+            tracker = accelerator.get_tracker("tensorboard")
+            if tracker:
+                tracker.writer.add_images(
+                    "validation/img", image, step, dataformats="NHWC"
+                )
+                tracker.writer.add_images(
+                    "validation/dem", dem, step, dataformats="NHWC"
+                )
+
+                feature_map_viz = feature_map[0].cpu().float().numpy()
+                feature_map_min = feature_map_viz.min()
+                feature_map_max = feature_map_viz.max()
+                if feature_map_max > feature_map_min:
+                    feature_map_viz = (feature_map_viz - feature_map_min) / (
+                        feature_map_max - feature_map_min
+                    )
+                feature_map_viz = feature_map_viz.transpose(1, 2, 0)
+                feature_map_viz = np.expand_dims(feature_map_viz, axis=0)
+                tracker.writer.add_images(
+                    "validation/feature_map", feature_map_viz, step, dataformats="NHWC"
+                )
+
+    adapter.train()
 
 
 def parse_args():
@@ -133,6 +271,7 @@ def main():
         weight_dtype = torch.bfloat16
 
     adapter = Adapter(channels=[320, 640, 1280, 1280], cin=192)
+    adapter.zero_initialize()
     if gradient_checkpointing:
         adapter.enable_gradient_checkpointing()
 
@@ -180,7 +319,7 @@ def main():
         width=width,
     )
     train_dataloader = DataLoader(
-        train_dataset,  # ty:ignore[invalid-argument-type] # type: ignore
+        train_dataset,  # type: ignore
         batch_size=train_batch_size,
         drop_last=True,
         num_workers=num_workers,
@@ -266,8 +405,7 @@ def main():
                     text_input_ids = text_inputs.to(accelerator.device)
                     prompt_embeds = text_encoder(
                         text_input_ids,
-                        output_hidden_states=True,
-                    ).hidden_states[-2]
+                    )[0]
 
                 prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
 
@@ -340,6 +478,22 @@ def main():
                 }
                 progress_bar.set_postfix(**logs)
                 accelerator.log(logs, step=global_step)
+
+                if global_step % validation_steps == 0:
+                    log_validation(
+                        unet,
+                        adapter,
+                        vae,
+                        text_encoder,
+                        tokenizer,
+                        noise_scheduler,
+                        accelerator,
+                        edge,
+                        weight_dtype,
+                        height,
+                        width,
+                        global_step,
+                    )
 
                 if global_step >= max_train_steps:
                     save_path = os.path.join(output_dir, f"checkpoint-{global_step}")

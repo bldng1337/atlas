@@ -163,6 +163,13 @@ class Adapter(nn.Module):
         self.body = nn.ModuleList(self.body)
         self.conv_in = nn.Conv2d(cin, channels[0], 3, 1, 1)
 
+    def zero_initialize(self):
+        nn.init.zeros_(self.conv_in.bias)  # type: ignore
+        nn.init.zeros_(self.conv_in.weight)  # type: ignore
+        for m in self.body:
+            nn.init.zeros_(m.block2.weight)  # type: ignore
+            nn.init.zeros_(m.block2.bias)  # type: ignore
+
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True
 
