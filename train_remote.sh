@@ -15,4 +15,5 @@ uv run accelerate launch --mixed_precision="bf16" train_t2i.py \
     --gradient_checkpointing True \
     --num_workers 0 \
     --xformer False \
-    --seed 42
+    --seed 42 \
+    --resume_from_checkpoint "latest"

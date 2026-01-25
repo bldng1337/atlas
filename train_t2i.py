@@ -48,6 +48,7 @@ streaming = False
 mixed_precision = "bf16"  # Use "fp16" for older GPUs, "bf16" for A100/H100
 seed = 42
 xformer = True
+resume_from_checkpoint = None
 
 
 def log_validation(
@@ -121,7 +122,10 @@ def log_validation(
         latents = latents * val_scheduler.init_noise_sigma
 
         adapter_features = adapter(feature_map)
-        adapter_features = [torch.cat([s] * 2, dim=0) for s in adapter_features]
+        adapter_features = [
+            torch.cat([s] * 2, dim=0).to(accelerator.device, dtype=weight_dtype)
+            for s in adapter_features
+        ]
 
         for t in tqdm(val_scheduler.timesteps, desc="Validation"):
             latent_model_input = torch.cat([latents] * 2)
@@ -196,6 +200,7 @@ def parse_args():
                 var_value = args[i + 1]
                 if var_name in globals():
                     original = globals()[var_name]
+                    # TODO We should also respect the types here not the runtime ones so the foo:int=1
                     if isinstance(original, bool):
                         var_value = var_value.lower() in ("true", "1", "yes")
                     elif isinstance(original, int):
@@ -250,7 +255,15 @@ def main():
             )
             i -= 1
 
+    def load_model_hook(models, input_dir):
+        while len(models) > 0:
+            model = models.pop()
+            load_path = os.path.join(input_dir, f"model_{len(models):02d}.pth")
+            if os.path.exists(load_path):
+                model.load_state_dict(torch.load(load_path))
+
     accelerator.register_save_state_pre_hook(save_model_hook)
+    accelerator.register_load_state_pre_hook(load_model_hook)
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
@@ -362,12 +375,61 @@ def main():
 
     initial_global_step = 0
 
+    global resume_from_checkpoint
+    if resume_from_checkpoint is not None:
+        path = None
+        if resume_from_checkpoint == "latest":
+            dirs = os.listdir(output_dir)
+            dirs = [d for d in dirs if d.startswith("checkpoint")]
+            if len(dirs) > 0:
+                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+                path = dirs[-1]
+            else:
+                logger.info(
+                    f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
+                )
+                resume_from_checkpoint = None
+        else:
+            path = resume_from_checkpoint
+
+        if path is not None:
+            logger.info(f"Resuming from checkpoint {path}")
+            accelerator.load_state(os.path.join(output_dir, path))
+            global_step = int(path.split("-")[1])
+            initial_global_step = global_step
+            try:
+                first_epoch = global_step // len(train_dataloader)
+            except Exception:
+                # We have a streaming dataset
+                first_epoch = 0
+
     progress_bar = tqdm(
         range(0, max_train_steps),
         initial=initial_global_step,
         desc="Steps",
         # Only show the progress bar once on each machine.
         disable=not accelerator.is_local_main_process,
+    )
+
+    map_batch = next(iter(train_dataloader))
+    validation_feature = map_batch["feature_map"].to(
+        accelerator.device, dtype=weight_dtype
+    )
+    del map_batch
+
+    log_validation(
+        unet,
+        adapter,
+        vae,
+        text_encoder,
+        tokenizer,
+        noise_scheduler,
+        accelerator,
+        validation_feature,
+        weight_dtype,
+        height,
+        width,
+        global_step,
     )
 
     for epoch in range(first_epoch, num_train_epochs):
@@ -488,7 +550,7 @@ def main():
                         tokenizer,
                         noise_scheduler,
                         accelerator,
-                        edge,
+                        validation_feature,
                         weight_dtype,
                         height,
                         width,
