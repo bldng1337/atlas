@@ -34,4 +34,5 @@ dependencies = [
     "wheel>=0.45.1",
     "xformers>=0.0.32.post2",
     "torchvision>=0.23.0",
+    "richdem>=0.3.4",
 ]

@@ -12,20 +12,20 @@ from datasets import load_dataset
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.optimization import SchedulerType, get_scheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from diffusers.training_utils import EMAModel
 from diffusers.utils.torch_utils import randn_tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from dataprep import preprocess
-from models import UNetDEMConditionModel
-from t2iadapter import Adapter
+from models import ControlNetDEMModel, UNetDEMConditionModel
 
 dataset_path = "bldng/atlas2"
 mesa_path = "NewtNewt/MESA"
 gradient_checkpointing = True
 tf32 = True
-learning_rate = 1e-4
+learning_rate = 1e-5
 gradient_accumulation_steps = 16
 train_batch_size = 1
 use_8bitadam = True
@@ -38,22 +38,25 @@ scheduler_type = "LINEAR"
 max_grad_norm = 1.0
 num_workers = 4
 set_grads_to_none = True
-project_dir = "./outputs"
-logging_dir = "./logs"
-output_dir = "./outputs/checkpoints"
+project_dir = "./outputs_controlnet"
+logging_dir = "./logs_controlnet"
+output_dir = "./outputs_controlnet/checkpoints"
 checkpointing_steps = 1000
 validation_steps = 1000
 proportion_empty_prompts = 0.2
 streaming = False
 mixed_precision = "bf16"  # Use "fp16" for older GPUs, "bf16" for A100/H100
 seed = 42
+use_ema = True
+ema_decay = 0.9999
 xformer = True
 resume_from_checkpoint = None
+conditioning_scale = 1.0
 
 
 def log_validation(
     unet,
-    adapter,
+    controlnet,
     vae,
     text_encoder,
     tokenizer,
@@ -69,7 +72,7 @@ def log_validation(
     logger.info("Running validation...")
 
     unet.eval()
-    adapter.eval()
+    controlnet.eval()
     vae.eval()
     text_encoder.eval()
 
@@ -121,23 +124,35 @@ def log_validation(
         )
         latents = latents * val_scheduler.init_noise_sigma
 
-        adapter_features = adapter(feature_map)
-        adapter_features = [
-            torch.cat([s] * 2, dim=0).to(accelerator.device, dtype=weight_dtype)
-            for s in adapter_features
-        ]
+        # Duplicate feature map for CFG (unconditional + conditional)
+        controlnet_cond = torch.cat([feature_map] * 2, dim=0).to(
+            accelerator.device, dtype=weight_dtype
+        )
 
         for t in tqdm(val_scheduler.timesteps, desc="Validation"):
             latent_model_input = torch.cat([latents] * 2)
             latent_model_input = val_scheduler.scale_model_input(latent_model_input, t)
 
+            # Run ControlNet
+            down_block_res_samples, mid_block_res_sample = controlnet(
+                latent_model_input,
+                t,
+                encoder_hidden_states=prompt_embeds,
+                controlnet_cond=controlnet_cond,
+                conditioning_scale=conditioning_scale,
+            )
+
+            # Run UNet with ControlNet residuals
             noise_pred = unet(
                 latent_model_input,
                 t,
                 encoder_hidden_states=prompt_embeds,
-                down_intrablock_additional_residuals=[
-                    sample.to(dtype=weight_dtype) for sample in adapter_features
+                down_block_additional_residuals=[
+                    s.to(dtype=weight_dtype) for s in down_block_res_samples
                 ],
+                mid_block_additional_residual=mid_block_res_sample.to(
+                    dtype=weight_dtype
+                ),
             ).sample
 
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -183,10 +198,13 @@ def log_validation(
                 feature_map_viz = feature_map_viz.transpose(1, 2, 0)
                 feature_map_viz = np.expand_dims(feature_map_viz, axis=0)
                 tracker.writer.add_images(
-                    "validation/feature_map", feature_map_viz, step, dataformats="NHWC"
+                    "validation/feature_map",
+                    feature_map_viz,
+                    step,
+                    dataformats="NHWC",
                 )
 
-    adapter.train()
+    controlnet.train()
 
 
 def parse_args():
@@ -200,7 +218,6 @@ def parse_args():
                 var_value = args[i + 1]
                 if var_name in globals():
                     original = globals()[var_name]
-                    # TODO We should also respect the types here not the runtime ones so the foo:int=1
                     if isinstance(original, bool):
                         var_value = var_value.lower() in ("true", "1", "yes")
                     elif isinstance(original, int):
@@ -244,9 +261,23 @@ def main():
     vae = AutoencoderKL.from_pretrained(mesa_path, subfolder="vae")
     unet = UNetDEMConditionModel.from_pretrained(mesa_path, subfolder="unet")
 
-    def save_model_hook(models, weights, output_dir):
-        i = len(weights) - 1
+    controlnet = ControlNetDEMModel.from_unet(
+        unet,
+        conditioning_channels=3,
+        load_weights_from_unet=True,
+    )
 
+    if use_ema:
+        ema_controlnet = EMAModel(
+            controlnet.parameters(),
+            decay=ema_decay,
+            foreach=True,
+        )
+
+    def save_model_hook(models, weights, output_dir):
+        if use_ema:
+            ema_controlnet.save_pretrained(os.path.join(output_dir, "ema_controlnet"))
+        i = len(weights) - 1
         while len(weights) > 0:
             weights.pop()
             model = models[i]
@@ -256,6 +287,15 @@ def main():
             i -= 1
 
     def load_model_hook(models, input_dir):
+        if use_ema:
+            ema_path = os.path.join(input_dir, "ema_controlnet")
+            if os.path.exists(ema_path):
+                load_model = EMAModel.from_pretrained(
+                    ema_path, model_cls=type(accelerator.unwrap_model(controlnet))
+                )
+                ema_controlnet.load_state_dict(load_model.state_dict())
+                ema_controlnet.to(accelerator.device)
+                del load_model
         while len(models) > 0:
             model = models.pop()
             load_path = os.path.join(input_dir, f"model_{len(models):02d}.pth")
@@ -268,11 +308,9 @@ def main():
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     unet.requires_grad_(False)
+
     if xformer:
         unet.enable_xformers_memory_efficient_attention()
-
-    # if gradient_checkpointing:
-    #     unet.enable_gradient_checkpointing()
 
     if tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -283,10 +321,8 @@ def main():
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
 
-    adapter = Adapter(channels=[320, 640, 1280, 1280], cin=192)
-
     if gradient_checkpointing:
-        adapter.enable_gradient_checkpointing()
+        controlnet.enable_gradient_checkpointing()
 
     if use_8bitadam:
         from bitsandbytes.optim.adamw import AdamW8bit
@@ -294,7 +330,7 @@ def main():
         optimizer_class = AdamW8bit
     else:
         optimizer_class = torch.optim.AdamW
-    params_to_optimize = adapter.parameters()
+    params_to_optimize = controlnet.parameters()
     optimizer = optimizer_class(
         params_to_optimize,
         lr=learning_rate,
@@ -309,10 +345,9 @@ def main():
     unet.eval()
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     text_encoder.eval()
-    adapter.to(accelerator.device, dtype=weight_dtype)
-    adapter.train()
+    controlnet.to(accelerator.device, dtype=weight_dtype)
+    controlnet.train()
 
-    # train_dataset = load_dataset(dataset_path, split="all")
     train_dataset = load_dataset(
         dataset_path,
         split="train",
@@ -349,9 +384,12 @@ def main():
         power=lr_power,
     )
 
-    adapter, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        adapter, optimizer, train_dataloader, lr_scheduler
+    controlnet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        controlnet, optimizer, train_dataloader, lr_scheduler
     )
+
+    if use_ema:
+        ema_controlnet.to(accelerator.device)
 
     total_batch_size = (
         train_batch_size * accelerator.num_processes * gradient_accumulation_steps
@@ -368,7 +406,7 @@ def main():
     logger.info(f"  Mixed precision = {mixed_precision}")
 
     if accelerator.is_main_process:
-        accelerator.init_trackers("t2i-adapter-training")
+        accelerator.init_trackers("controlnet-training")
 
     global_step = 0
     first_epoch = 0
@@ -419,7 +457,7 @@ def main():
 
     log_validation(
         unet,
-        adapter,
+        controlnet,
         vae,
         text_encoder,
         tokenizer,
@@ -434,7 +472,7 @@ def main():
 
     for epoch in range(first_epoch, num_train_epochs):
         for step, batch in enumerate(train_dataloader):
-            with accelerator.accumulate(adapter):
+            with accelerator.accumulate(controlnet):
                 batch["img"] = batch["img"].to(accelerator.device)
                 batch["dem"] = batch["dem"].to(accelerator.device)
                 with torch.no_grad():
@@ -470,17 +508,28 @@ def main():
 
                 prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
 
-                edge = batch["feature_map"].to(accelerator.device, dtype=weight_dtype)
+                controlnet_cond = batch["feature_map"].to(
+                    accelerator.device, dtype=weight_dtype
+                )
 
-                adapter_features = adapter(edge)
+                down_block_res_samples, mid_block_res_sample = controlnet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=prompt_embeds,
+                    controlnet_cond=controlnet_cond,
+                    conditioning_scale=conditioning_scale,
+                )
 
                 model_pred = unet(
                     noisy_latents,
                     timesteps,
                     encoder_hidden_states=prompt_embeds,
-                    down_intrablock_additional_residuals=[
-                        sample.to(dtype=weight_dtype) for sample in adapter_features
+                    down_block_additional_residuals=[
+                        s.to(dtype=weight_dtype) for s in down_block_res_samples
                     ],
+                    mid_block_additional_residual=mid_block_res_sample.to(
+                        dtype=weight_dtype
+                    ),
                 ).sample
 
                 if noise_scheduler.config["prediction_type"] == "epsilon":
@@ -516,11 +565,15 @@ def main():
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
-                    params_to_clip = adapter.parameters()
+                    params_to_clip = controlnet.parameters()
                     accelerator.clip_grad_norm_(params_to_clip, max_grad_norm)
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=set_grads_to_none)
+                    if use_ema:
+                        ema_controlnet.step(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -539,13 +592,22 @@ def main():
                     "loss": loss.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0],
                 }
+                if use_ema:
+                    logs["ema_decay"] = ema_controlnet.cur_decay_value
                 progress_bar.set_postfix(**logs)
                 accelerator.log(logs, step=global_step)
 
                 if global_step % validation_steps == 0:
+                    if use_ema:
+                        ema_controlnet.store(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
+                        ema_controlnet.copy_to(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
                     log_validation(
                         unet,
-                        adapter,
+                        controlnet,
                         vae,
                         text_encoder,
                         tokenizer,
@@ -557,11 +619,26 @@ def main():
                         width,
                         global_step,
                     )
+                    if use_ema:
+                        ema_controlnet.restore(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
 
                 if global_step >= max_train_steps:
+                    if use_ema:
+                        ema_controlnet.store(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
+                        ema_controlnet.copy_to(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
                     save_path = os.path.join(output_dir, f"checkpoint-{global_step}")
                     accelerator.save_state(save_path)
                     logger.info(f"Saved state to {save_path}")
+                    if use_ema:
+                        ema_controlnet.restore(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
                     break
 
         if global_step >= max_train_steps:
@@ -570,6 +647,7 @@ def main():
         save_path = os.path.join(output_dir, f"checkpoint-{global_step}")
         accelerator.save_state(save_path)
         logger.info(f"Saved state to {save_path}")
+    accelerator.end_training()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,3 @@
-from collections import OrderedDict
-
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
@@ -44,7 +42,7 @@ def get_parameter_dtype(parameter: torch.nn.Module):
     except StopIteration:
         # For torch.nn.DataParallel compatibility in PyTorch 1.5
 
-        def find_tensor_attributes(module: torch.nn.Module) -> List[Tuple[str, Tensor]]:
+        def find_tensor_attributes(module: torch.nn.Module) -> list[tuple[str, Tensor]]:
             tuples = [(k, v) for k, v in module.__dict__.items() if torch.is_tensor(v)]
             return tuples
 
@@ -162,6 +160,10 @@ class Adapter(nn.Module):
                 )
         self.body = nn.ModuleList(self.body)
         self.conv_in = nn.Conv2d(cin, channels[0], 3, 1, 1)
+
+    def load_adapter(self, adapter_path: str):
+        state_dict = torch.load(adapter_path)
+        self.load_state_dict(state_dict)
 
     def zero_initialize(self):
         nn.init.zeros_(self.conv_in.bias)  # type: ignore
