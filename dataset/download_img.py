@@ -1,11 +1,13 @@
-import shutil
-import daft
-from tqdm import tqdm
-from time import sleep
 import os
-import fsspec
+from time import sleep
+
+import daft
 import pyarrow.parquet as pq
 from fsspec.parquet import open_parquet_file
+from tqdm import tqdm
+
+meta_parqet = r"D:\DATA\dataset\temp\meta_filtered.parquet"
+out_folder = r"D:\DATA\dataset\temp\img_dem_download"
 
 # We only do very little work in daft so the progress bars only flash and dont really show anything
 os.environ["DAFT_PROGRESS_BAR"] = "0"
@@ -40,8 +42,9 @@ def download(
             sleep(seconds)
 
 
-meta = daft.read_parquet("meta.parquet")
+meta = daft.read_parquet(meta_parqet)
 print(f"Downloading Images for {meta.count_rows()} rows")
+
 imgdata = (
     meta.select("parquet_url_img", "parquet_row_img", "grid_cell")
     .groupby("parquet_url_img")
@@ -55,50 +58,56 @@ demdata = (
     .agg_list()
     .to_pylist()
 )
+while True:
+    try:
+        demdata = [
+            dem
+            for dem in demdata
+            if not os.path.exists(
+                f"temp/dem/{dem['parquet_url_dem'].split('/')[-1].split('.')[0]}.parquet"
+            )
+        ]
 
-demdata = [
-    dem
-    for dem in demdata
-    if not os.path.exists(
-        f"temp/dem/{dem['parquet_url_dem'].split('/')[-1].split('.')[0]}.parquet"
-    )
-]
+        for i, row in tqdm(
+            enumerate(demdata), "Downloading DEM Data", total=len(demdata)
+        ):
+            url = row["parquet_url_dem"]
+            name = f"{out_folder}/dem/{url.split('/')[-1].split('.')[0]}.parquet"
+            if os.path.exists(name):
+                tqdm.write(f"Skipping {name}")
+                continue
+            table = download(
+                row["grid_cell"],
+                url,
+                ["grid_cell", "DEM"],
+                row["parquet_row_dem"],
+            )
+            tqdm.write(f"Writing {table.count_rows()}")
+            table.write_parquet(name)
 
-for i, row in tqdm(enumerate(demdata), "Downloading DEM Data", total=len(demdata)):
-    url = row["parquet_url_dem"]
-    name = f"temp/dem/{url.split('/')[-1].split('.')[0]}.parquet"
-    if os.path.exists(name):
-        tqdm.write(f"Skipping {name}")
-        continue
-    table = download(
-        row["grid_cell"],
-        url,
-        ["grid_cell", "thumbnail", "DEM", "compressed"],
-        row["parquet_row_dem"],
-    )
-    tqdm.write(f"Writing {table.count_rows()}")
-    table.write_parquet(name)
+        imgdata = [
+            img
+            for img in imgdata
+            if not os.path.exists(
+                f"{out_folder}/img/{img['parquet_url_img'].split('/')[-1].split('.')[0]}.parquet"
+            )
+        ]
 
-
-imgdata = [
-    img
-    for img in imgdata
-    if not os.path.exists(
-        f"temp/img/{img['parquet_url_img'].split('/')[-1].split('.')[0]}.parquet"
-    )
-]
-
-for i, row in tqdm(enumerate(imgdata), "Downloading Image Data", total=len(imgdata)):
-    url = row["parquet_url_img"]
-    name = f"temp/img/{url.split('/')[-1].split('.')[0]}.parquet"
-    if os.path.exists(name):
-        tqdm.write(f"Skipping {name}")
-        continue
-    table = download(
-        row["grid_cell"],
-        url,
-        ["grid_cell", "thumbnail", "B04", "B03", "B02", "cloud_mask"],
-        row["parquet_row_img"],
-    )
-    table.write_parquet(name)
-
+        for i, row in tqdm(
+            enumerate(imgdata), "Downloading Image Data", total=len(imgdata)
+        ):
+            url = row["parquet_url_img"]
+            name = f"{out_folder}/img/{url.split('/')[-1].split('.')[0]}.parquet"
+            if os.path.exists(name):
+                tqdm.write(f"Skipping {name}")
+                continue
+            table = download(
+                row["grid_cell"],
+                url,
+                ["grid_cell", "B04", "B03", "B02", "cloud_mask"],
+                row["parquet_row_img"],
+            )
+            table.write_parquet(name)
+    except:
+        tqdm.write("Encountered error in main loop, restarting after 5s...")
+        sleep(5)

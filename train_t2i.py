@@ -21,7 +21,7 @@ from dataprep import preprocess
 from models import UNetDEMConditionModel
 from t2iadapter import Adapter
 
-dataset_path = "bldng/atlas"
+dataset_path = "bldng/atlas2"
 mesa_path = "NewtNewt/MESA"
 gradient_checkpointing = True
 tf32 = True
@@ -284,7 +284,7 @@ def main():
         weight_dtype = torch.bfloat16
 
     adapter = Adapter(channels=[320, 640, 1280, 1280], cin=192)
-    adapter.zero_initialize()
+
     if gradient_checkpointing:
         adapter.enable_gradient_checkpointing()
 
@@ -501,8 +501,7 @@ def main():
                 cloud_mask_latent = F.interpolate(
                     cloud_mask,
                     size=(model_pred.shape[2], model_pred.shape[3]),
-                    mode="bilinear",
-                    align_corners=False,
+                    mode="nearest",
                 )
 
                 loss_weight = (1.0 - cloud_mask_latent).expand_as(model_pred)
@@ -511,7 +510,10 @@ def main():
                 weighted_mse = mse * loss_weight
 
                 # Normalize by sum of weights
-                loss = weighted_mse.sum() / (loss_weight.sum() + 1e-8)
+                loss = (
+                    weighted_mse.sum(dim=(1, 2, 3))
+                    / loss_weight.sum(dim=(1, 2, 3)).clamp_min(1e-8)
+                ).mean()
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:

@@ -1,7 +1,7 @@
 nohup uv run tensorboard --logdir ./logs --port 8888 --bind_all &
 
 uv run accelerate launch --mixed_precision="bf16" train_t2i.py \
-    --dataset_path "bldng/atlas" \
+    --dataset_path "bldng/atlas2" \
     --mesa_path "NewtNewt/MESA" \
     --output_dir "./outputs/run_5090_uv" \
     --train_batch_size 8 \

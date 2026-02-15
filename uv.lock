@@ -244,6 +244,7 @@ dependencies = [
     { name = "pybind11" },
     { name = "pysheds" },
     { name = "rasterio" },
+    { name = "richdem" },
     { name = "s3fs" },
     { name = "scikit-image" },
     { name = "setuptools" },
@@ -277,6 +278,7 @@ requires-dist = [
     { name = "pybind11", specifier = ">=3.0.1" },
     { name = "pysheds", specifier = ">=0.5" },
     { name = "rasterio", specifier = ">=1.4.3" },
+    { name = "richdem", specifier = ">=0.3.4" },
     { name = "s3fs", specifier = ">=2025.9.0" },
     { name = "scikit-image", specifier = ">=0.24.0" },
     { name = "setuptools", specifier = ">=80.9.0" },
@@ -2228,6 +2230,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/aa/9c/137848452e130e71f
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fa/e0/83cbdcb81b5cbbbe355648dd402b410437806544f48ee218a2354798f012/rich-14.3.0-py3-none-any.whl", hash = "sha256:0b8c1e368c1125b9e993c2d2f1342802525f4853fc6dac2e8e9e88bac0f45bce", size = 309950, upload-time = "2026-01-24T12:25:44.679Z" },
 ]
+
+[[package]]
+name = "richdem"
+version = "0.3.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/20/8f/1fa0e1af7c4f0107305081513dae0234f327cbe5fc3a5db41d38915a2213/richdem-0.3.4.tar.gz", hash = "sha256:a9d3119ca8e25aa73039c94816f68ac2e1c33dc8ef02b0467c090d44243a7ad1", size = 329364, upload-time = "2018-07-13T20:03:49.648Z" }
 
 [[package]]
 name = "rpds-py"
