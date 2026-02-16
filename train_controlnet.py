@@ -270,6 +270,8 @@ def main():
     if use_ema:
         ema_controlnet = EMAModel(
             controlnet.parameters(),
+            model_cls=ControlNetDEMModel,
+            model_config=controlnet.config,
             decay=ema_decay,
             foreach=True,
         )
@@ -469,6 +471,12 @@ def main():
         width,
         global_step,
     )
+
+    if global_step == 0:
+        accelerator.save_state(os.path.join(output_dir, f"checkpoint-{global_step}"))
+        logger.info(
+            f"Saved initial state to {os.path.join(output_dir, f'checkpoint-{global_step}')}"
+        )
 
     for epoch in range(first_epoch, num_train_epochs):
         for step, batch in enumerate(train_dataloader):

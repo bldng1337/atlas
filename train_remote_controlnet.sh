@@ -22,4 +22,5 @@ uv run accelerate launch --mixed_precision="bf16" train_controlnet.py \
     --xformer False \
     --seed 42 \
     --resume_from_checkpoint "latest" \
-    --conditioning_scale 1.0
+    --conditioning_scale 1.0 \
+    --streaming True
