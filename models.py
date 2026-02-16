@@ -1318,6 +1318,7 @@ class UNetDEMConditionModel(
 
         # 0. center input if necessary
         if self.config.center_input_sample:
+            print("WARN Control net does not have centered input sample")
             sample = 2 * sample - 1.0
 
         # 1. time
@@ -2286,8 +2287,8 @@ class ControlNetDEMModel(ModelMixin, ConfigMixin):
             ) * -10000.0
             encoder_attention_mask = encoder_attention_mask.unsqueeze(1)
 
-        if self.config.center_input_sample:
-            sample = 2 * sample - 1.0
+        # if self.config.center_input_sample:
+        #     sample = 2 * sample - 1.0
 
         t_emb = self.get_time_embed(sample=sample, timestep=timestep)
         emb = self.time_embedding(t_emb, timestep_cond)
