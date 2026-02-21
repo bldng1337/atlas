@@ -440,13 +440,23 @@ def main():
     generator = torch.Generator(device="cpu")
     generator.manual_seed(seed)
 
-    terrain_pipeline = TerrainDiffusionPipeline.from_pretrained(mesa_path)
+    noise_scheduler = DDIMScheduler.from_pretrained(mesa_path, subfolder="scheduler")
+    text_encoder = CLIPTextModel.from_pretrained(mesa_path, subfolder="text_encoder")
+    tokenizer = CLIPTokenizer.from_pretrained(mesa_path, subfolder="tokenizer")
+    vae = AutoencoderKL.from_pretrained(mesa_path, subfolder="vae")
+    unet = UNetDEMConditionModel.from_pretrained(mesa_path, subfolder="unet")
 
-    noise_scheduler: DDIMScheduler = terrain_pipeline.scheduler
-    text_encoder: CLIPTextModel = terrain_pipeline.text_encoder
-    tokenizer: CLIPTokenizer = terrain_pipeline.tokenizer
-    vae: AutoencoderKL = terrain_pipeline.vae
-    unet: UNetDEMConditionModel = terrain_pipeline.unet
+    terrain_pipeline = TerrainDiffusionPipeline(
+        vae=vae,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        unet=unet,
+        scheduler=noise_scheduler,
+        safety_checker=None,
+        feature_extractor=None,
+        image_encoder=None,
+        requires_safety_checker=False,
+    )
 
     controlnet = ControlNetDEMModel.from_unet(
         unet,
