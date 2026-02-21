@@ -466,19 +466,10 @@ def main():
 
     terrain_pipeline = terrain_pipeline.to(accelerator.device)
 
-    global prompts_csv_path
-
-    if "/" in mesa_path and not os.path.isabs(mesa_path):
-        try:
-            resolved_path = snapshot_download(repo_id=mesa_path, local_files_only=True)
-
-            prompts_csv_path = os.path.join(resolved_path, "weights", "prompts.csv")
-            print(f"Resolved HF hub ID '{mesa_path}' to local cache: {resolved_path}")
-        except Exception as e:
-            print(f"Warning: Could not resolve HF hub ID '{mesa_path}': {e}")
-            print(f"Using default prompts_csv_path: {prompts_csv_path}")
+    prompts_csv_path = os.path.join("./prompts.csv")
 
     if os.path.exists(prompts_csv_path):
+        logger.info(f"Loading prompts from {prompts_csv_path}...")
         gen_prompts = load_prompts_from_csv(prompts_csv_path)
         logger.info(f"Loaded {len(gen_prompts)} prompts from {prompts_csv_path}")
         if len(gen_prompts) < train_batch_size:
