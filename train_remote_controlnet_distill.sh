@@ -2,7 +2,7 @@
 
 nohup uv run tensorboard --logdir ./outputs_controlnet_distill/run_5090/logs --port 8888 --bind_all &
 
-uv run accelerate launch --mixed_precision="bf16" train_controlnet.py \
+uv run accelerate launch --mixed_precision="bf16" train_controlnet_distill.py \
     --mesa_path "NewtNewt/MESA" \
     --output_dir "./outputs_controlnet_distill/run_5090" \
     --project_dir "./outputs_controlnet_distill/run_5090" \
