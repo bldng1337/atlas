@@ -4,7 +4,7 @@
 ###########################################################################
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -42,13 +42,13 @@ from diffusers.models.unets.unet_2d_blocks import (
 from diffusers.utils import (
     USE_PEFT_BACKEND,
     BaseOutput,
+    deprecate,
     logging,
     scale_lora_layers,
     unscale_lora_layers,
 )
-from packaging import version
 
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+logger = logging.get_logger(__name__)
 
 
 @dataclass
@@ -62,24 +62,6 @@ class UNet2DConditionOutput(BaseOutput):
     """
 
     sample: torch.Tensor = None
-
-
-def is_torch_version(op, target_version):
-    torch_version = version.parse(torch.__version__.split("+")[0])
-    target = version.parse(target_version)
-
-    if op == ">=":
-        return torch_version >= target
-    elif op == ">":
-        return torch_version > target
-    elif op == "==":
-        return torch_version == target
-    elif op == "<=":
-        return torch_version <= target
-    elif op == "<":
-        return torch_version < target
-    else:
-        raise ValueError(f"Unsupported operator: {op}")
 
 
 class UNetDEMConditionModel(
@@ -978,10 +960,6 @@ class UNetDEMConditionModel(
         reversed_slice_size = list(reversed(slice_size))
         for module in self.children():
             fn_recursive_set_attention_slice(module, reversed_slice_size)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if hasattr(module, "gradient_checkpointing"):
-            module.gradient_checkpointing = value
 
     def enable_freeu(self, s1: float, s2: float, b1: float, b2: float):
         r"""Enables the FreeU mechanism from https://arxiv.org/abs/2309.11497.
@@ -1987,32 +1965,6 @@ class ControlNetDEMModel(ModelMixin, ConfigMixin):
             nn.Conv2d(block_out_channels[-1], block_out_channels[-1], kernel_size=1)
         )
 
-    def enable_gradient_checkpointing(
-        self, gradient_checkpointing_func: Optional[Callable] = None
-    ) -> None:
-        if not self._supports_gradient_checkpointing:
-            raise ValueError(
-                f"{self.__class__.__name__} does not support gradient checkpointing..."
-            )
-
-        if gradient_checkpointing_func is None:
-
-            def _gradient_checkpointing_func(module, *args):
-                ckpt_kwargs = (
-                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                )
-                return torch.utils.checkpoint.checkpoint(
-                    module.__call__,
-                    *args,
-                    **ckpt_kwargs,
-                )
-
-            gradient_checkpointing_func = _gradient_checkpointing_func
-
-        self._set_gradient_checkpointing(
-            enable=True, gradient_checkpointing_func=gradient_checkpointing_func
-        )
-
     @classmethod
     def from_unet(
         cls,
@@ -2021,7 +1973,7 @@ class ControlNetDEMModel(ModelMixin, ConfigMixin):
         load_weights_from_unet: bool = True,
     ):
         controlnet = cls(
-            in_channels=unet.config["in_channels"],  # 8 channels (4 img + 4 dem)
+            in_channels=unet.config["in_channels"],
             hint_channels=conditioning_channels,
             flip_sin_to_cos=unet.config["flip_sin_to_cos"],
             freq_shift=unet.config["freq_shift"],

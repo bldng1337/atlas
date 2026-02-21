@@ -883,6 +883,7 @@ class TerrainDiffusionPipeline(
         negative_prompt_embeds: Optional[torch.Tensor] = None,
         ip_adapter_image: Optional[PipelineImageInput] = None,
         ip_adapter_image_embeds: Optional[List[torch.Tensor]] = None,
+        adapter_features: Optional[List[torch.Tensor]] = None,
         output_type: Optional[str] = "np",
         return_dict: bool = True,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -983,6 +984,12 @@ class TerrainDiffusionPipeline(
                 second element is a list of `bool`s indicating whether the corresponding generated image contains
                 "not-safe-for-work" (nsfw) content.
         """
+
+        if adapter_features is not None:
+            adapter_features = [
+                torch.cat([s] * 2, dim=0).to(self.device, dtype=torch.float16)
+                for s in adapter_features
+            ]
 
         callback = kwargs.pop("callback", None)
         callback_steps = kwargs.pop("callback_steps", None)
@@ -1137,6 +1144,7 @@ class TerrainDiffusionPipeline(
                     timestep_cond=timestep_cond,
                     cross_attention_kwargs=self.cross_attention_kwargs,
                     added_cond_kwargs=added_cond_kwargs,
+                    down_intrablock_additional_residuals=adapter_features,
                     return_dict=False,
                 )[0]
 

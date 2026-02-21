@@ -1,3 +1,6 @@
+import os
+import sys
+
 import numpy as np
 import richdem as rd
 from scipy import ndimage
@@ -5,6 +8,33 @@ from skan.csr import Skeleton, summarize
 from skimage import feature, filters, morphology
 from skimage.measure import label, regionprops
 from skimage.morphology import skeletonize
+
+
+def suppress_system_output(func):
+    def wrapper(*args, **kwargs):
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+        saved_stdout_fd = os.dup(1)
+        saved_stderr_fd = os.dup(2)
+
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull_fd, 1)
+            os.dup2(devnull_fd, 2)
+            return func(*args, **kwargs)
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+
+            os.dup2(saved_stdout_fd, 1)
+            os.dup2(saved_stderr_fd, 2)
+
+            os.close(devnull_fd)
+            os.close(saved_stdout_fd)
+            os.close(saved_stderr_fd)
+
+    return wrapper
 
 
 def num_features(m):
