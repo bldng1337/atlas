@@ -55,7 +55,7 @@ resume_from_checkpoint = None
 conditioning_scale = 1.0
 
 
-num_inference_steps_gen = 25
+num_inference_steps_gen = 12
 guidance_scale_gen = 7.5
 
 
@@ -195,7 +195,7 @@ def log_validation(
 
     vae_scale_factor = 2 ** (len(vae.config["block_out_channels"]) - 1)
     val_scheduler = cast(DDIMScheduler, DDIMScheduler.from_config(scheduler.config))
-    val_scheduler.set_timesteps(50, device=accelerator.device)
+    val_scheduler.set_timesteps(25, device=accelerator.device)
 
     with torch.no_grad():
         logger.info("Running static validation...")
@@ -384,29 +384,24 @@ def generate_synthetic_batch(
             output_type="pt",
         )
 
+    dems_numpy = dems.float().cpu().numpy() * 1000
+
     feature_maps = []
     for i in range(batch_size):
-        dem_numpy = dems[i].float().cpu().numpy()
-        dem_numpy = dem_numpy * 1000
-        dem_numpy = dem_numpy.mean(axis=0)
+        dem_numpy = dems_numpy[i].mean(axis=0)
         feature_map, _ = get_map_combined(dem_numpy, dem_size=width)
         feature_map_tensor = torch.from_numpy(feature_map).permute(2, 0, 1).float()
         feature_maps.append(feature_map_tensor)
 
     feature_maps = torch.stack(feature_maps).to(device=device, dtype=torch.float32)
 
-    txts = []
-    for prompt in selected_prompts:
-        txts.append(
-            tokenizer(
-                prompt,
-                padding="max_length",
-                max_length=tokenizer.model_max_length,
-                truncation=True,
-                return_tensors="pt",
-            ).input_ids.to(device=device)
-        )
-    txts = torch.cat(txts, dim=0)
+    txts = tokenizer(
+        selected_prompts,
+        padding="max_length",
+        max_length=tokenizer.model_max_length,
+        truncation=True,
+        return_tensors="pt",
+    ).input_ids.to(device=device)
 
     return {
         "img": images,
@@ -677,7 +672,7 @@ def main():
         terrain_pipeline=terrain_pipeline,
         gen_prompts=gen_prompts,
         generator=generator,
-        num_random_validations=3,
+        num_random_validations=1,
     )
 
     if global_step == 0:
@@ -841,7 +836,7 @@ def main():
                     terrain_pipeline=terrain_pipeline,
                     gen_prompts=gen_prompts,
                     generator=generator,
-                    num_random_validations=3,
+                    num_random_validations=1,
                 )
                 if use_ema:
                     ema_controlnet.restore(
