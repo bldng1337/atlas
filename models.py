@@ -1860,7 +1860,25 @@ class ControlNetDEMModel(ModelMixin, ConfigMixin):
         else:
             blocks_time_embed_dim = time_embed_dim
 
-        self.input_hint_block = nn.Sequential(
+        self.input_hint_block_img = nn.Sequential(
+            nn.Conv2d(conditioning_channels, 16, 3, padding=1),
+            nn.SiLU(),
+            nn.Conv2d(16, 16, 3, padding=1),
+            nn.SiLU(),
+            nn.Conv2d(16, 32, 3, padding=1, stride=2),
+            nn.SiLU(),
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.SiLU(),
+            nn.Conv2d(32, 96, 3, padding=1, stride=2),
+            nn.SiLU(),
+            nn.Conv2d(96, 96, 3, padding=1),
+            nn.SiLU(),
+            nn.Conv2d(96, 256, 3, padding=1, stride=2),
+            nn.SiLU(),
+            zero_module(nn.Conv2d(256, block_out_channels[0], 3, padding=1)),
+        )
+
+        self.input_hint_block_dem = nn.Sequential(
             nn.Conv2d(conditioning_channels, 16, 3, padding=1),
             nn.SiLU(),
             nn.Conv2d(16, 16, 3, padding=1),
@@ -2271,7 +2289,8 @@ class ControlNetDEMModel(ModelMixin, ConfigMixin):
             added_cond_kwargs=added_cond_kwargs,
         )
 
-        guided_hint = self.input_hint_block(controlnet_cond)
+        guided_hint_img = self.input_hint_block_img(controlnet_cond)
+        guided_hint_dem = self.input_hint_block_dem(controlnet_cond)
 
         sample_img = sample[:, :4, :, :]
         sample_dem = sample[:, 4:, :, :]
@@ -2279,8 +2298,8 @@ class ControlNetDEMModel(ModelMixin, ConfigMixin):
         sample_img = self.conv_in_img(sample_img)
         sample_dem = self.conv_in_dem(sample_dem)
 
-        sample_img = sample_img + guided_hint
-        sample_dem = sample_dem + guided_hint
+        sample_img = sample_img + guided_hint_img
+        sample_dem = sample_dem + guided_hint_dem
 
         if (
             hasattr(self.head_img, "has_cross_attention")

@@ -18,7 +18,7 @@ legacy/
 *.parquet
 
 
-
+.env
 *.aux
 *.log
 *.run.xml

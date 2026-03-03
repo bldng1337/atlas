@@ -1,148 +1,156 @@
-import os
-import sys
+import random
+from typing import Tuple
 
 import numpy as np
 import richdem as rd
-from scipy import ndimage
-from skan.csr import Skeleton, summarize
-from skimage import feature, filters, morphology
+from scipy.ndimage import gaussian_filter
+from skimage.feature import canny
 from skimage.measure import label, regionprops
-from skimage.morphology import skeletonize
+from skimage.morphology import dilation, disk, remove_small_objects, square
 
 
-def suppress_system_output(func):
-    def wrapper(*args, **kwargs):
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        saved_stdout_fd = os.dup(1)
-        saved_stderr_fd = os.dup(2)
-
-        devnull_fd = os.open(os.devnull, os.O_WRONLY)
-        try:
-            os.dup2(devnull_fd, 1)
-            os.dup2(devnull_fd, 2)
-            return func(*args, **kwargs)
-        finally:
-            sys.stdout.flush()
-            sys.stderr.flush()
-
-            os.dup2(saved_stdout_fd, 1)
-            os.dup2(saved_stderr_fd, 2)
-
-            os.close(devnull_fd)
-            os.close(saved_stdout_fd)
-            os.close(saved_stderr_fd)
-
-    return wrapper
+def compute_slope(dem_norm: np.ndarray) -> np.ndarray:
+    dy, dx = np.gradient(dem_norm)
+    return np.sqrt(dx**2 + dy**2)
 
 
-def num_features(m):
-    m = m * 255
-    m = ndimage.gaussian_filter(m, sigma=0.7)
-    m = m > 0
+def flow_accumulation(dem: np.ndarray) -> np.ndarray:
+    rda = rd.rdarray(dem.astype(np.float64), no_data=-9999)
+    rd.FillDepressions(rda, epsilon=True, in_place=True)
+    acc = rd.FlowAccumulation(rda, method="D8")
+    return np.array(acc, dtype=np.float64)
 
-    labeled_array, num_features = ndimage.label(
-        m, structure=ndimage.generate_binary_structure(m.ndim, 2)
+
+def strahler_approx(flow_acc: np.ndarray, n_orders: int = 6) -> np.ndarray:
+    max_acc = flow_acc.max()
+    if max_acc == 0:
+        return np.zeros_like(flow_acc, dtype=np.uint8)
+    thresholds = np.logspace(
+        np.log10(max_acc * 0.00004),
+        np.log10(max_acc * 0.5),
+        num=n_orders,
     )
-    pixel_counts = np.bincount(labeled_array.ravel())
-    feature_pixel_counts = pixel_counts[1:]
-    return num_features, feature_pixel_counts
+    order = np.zeros(flow_acc.shape, dtype=np.uint8)
+    for o, thresh in enumerate(thresholds, start=1):
+        order[flow_acc >= thresh] = o
+    return order
 
 
-def clean(m, max_features=5):
-    skeleton = m.astype(bool)
+def dropout(
+    mask: np.ndarray,
+    order: np.ndarray,
+    min_size: int = 10,
+    min_dropout=0.2,
+    max_dropout=0.5,
+) -> np.ndarray:
+    unique_orders = np.unique(order[mask > 0])[::-1]
+    res = mask.copy()
+    max_order = unique_orders.max()
+    for o in unique_orders:
+        dropout_prob = min_dropout + (1 - o / (max_order + 1e-9)) * (
+            max_dropout - min_dropout
+        )
+        dropout_mask = (order == o) & (mask > 0)
+        higher_order_mask = (order > o) & (res > 0)
+        labeled = label(dropout_mask)
+        for region in regionprops(labeled):
+            reg = labeled == region.label
+            if region.area < min_size:
+                res[reg] = 0
+                continue
+            if (
+                o != max_order
+                and not np.any(dilation(reg, square(3)) & higher_order_mask)
+            ):  # If no higher order branches exist we drop it so there are no floating branches
+                res[reg] = 0
+                continue
+            if np.random.rand() < dropout_prob:
+                res[reg] = 0
+                continue
+            res[reg] = 1
+    return res
 
-    labeled = label(skeleton)
-    regions = regionprops(labeled)
 
-    regions_sorted = sorted(regions, key=lambda x: x.area, reverse=True)
+def extract_terrain_features(
+    dem: np.ndarray,
+    gaussian_sigma: float = 1.5,
+    flow_acc_percentile: float = 99.0,
+    n_strahler_orders: int = 6,
+    canny_sigma: float = 1.5,
+    canny_low_threshold: float = 0.05,
+    canny_high_threshold: float = 0.15,
+    cliff_slope_percentile: float = 75.0,
+    flat_slope_percentile: float = 20.0,
+    thickness: int = 4,
+    min_feature_size: int = 80,
+    line_sigma: float = 0.2,
+    min_dropout_rate: float = 0.2,
+    max_dropout_rate: float = 0.8,
+) -> Tuple[np.ndarray, np.ndarray]:
+    dem = dem.astype(np.float64)
+    dem_blur = gaussian_filter(dem, sigma=gaussian_sigma)
+    lo, hi = dem_blur.min(), dem_blur.max()
+    dem_norm = (dem_blur - lo) / (hi - lo + 1e-9)
+    slope = compute_slope(dem_norm)
 
-    result = np.zeros_like(m, dtype=bool)
-    features_to_keep = regions_sorted[:max_features]
+    flat_thresh = np.percentile(slope, flat_slope_percentile)
+    flat_mask = (slope < flat_thresh).astype(np.float32)
 
-    for region in features_to_keep:
-        result[labeled == region.label] = True
+    # Valley
+    flow_acc = flow_accumulation(dem_blur)
+    valley_thresh = np.percentile(flow_acc, flow_acc_percentile)
+    valley_mask = flow_acc >= valley_thresh
+    valley_order = strahler_approx(flow_acc, n_orders=n_strahler_orders)
 
-    return result.astype(np.uint8)
+    # Ridge
+    dem_inv = dem_blur.max() - dem_blur
+    flow_acc_inv = flow_accumulation(dem_inv)
+    ridge_thresh = np.percentile(flow_acc_inv, flow_acc_percentile)
+    ridge_mask = flow_acc_inv >= ridge_thresh
+    ridge_order = strahler_approx(flow_acc_inv, n_orders=n_strahler_orders)
 
-
-def skeleton(m, blur_sigma=2):
-    m = ndimage.gaussian_filter(m * 15, sigma=blur_sigma) + m
-    m = skeletonize(m)
-    return m
-
-
-def process_flow(flow, high_percentile=99.5, low_percentile=95, blur_sigma=1.5):
-    high_thresh = np.percentile(flow, high_percentile)
-    low_thresh = np.percentile(flow, low_percentile)
-    hysteresis_binary = filters.apply_hysteresis_threshold(
-        flow, low=low_thresh, high=high_thresh
+    # Cliff
+    edges = canny(
+        dem_norm,
+        sigma=canny_sigma,
+        low_threshold=canny_low_threshold,
+        high_threshold=canny_high_threshold,
     )
-    return hysteresis_binary
+    steep_thresh = np.percentile(slope, cliff_slope_percentile)
+    steep_mask = dilation(slope > steep_thresh, disk(2))
+    cliff_mask = edges & steep_mask
 
+    cliff_order = np.zeros(dem.shape, dtype=np.uint8)
+    for rank, pct in enumerate([50, 65, 75, 85, 95], start=1):
+        cliff_order[cliff_mask & (slope >= np.percentile(slope, pct))] = rank
 
-def get_maps(
-    dem,
-    dem_size=30,
-    canny_sigma=1.5,
-    blur_sigma=1.5,
-    slope_threshold_steep=20.0,
-    slope_threshold_flat=2.0,
-    high_percentile=99.7,
-    low_percentile=99,
-    min_branch_length=100,
-    max_features=2,
-    max_total_pixels=5000,
-    line_sigma=1.5,
-):
-    cell_size = dem_size / dem.shape[1]
-    geotr = (0.0, cell_size, 0.0, 0.0, 0.0, -cell_size)
-    dem = dem.reshape(dem.shape[1], dem.shape[1])
-    dem = ndimage.gaussian_filter(dem, sigma=blur_sigma)
-    dem_inv = dem.max() - dem
-    dem = rd.rdarray(dem, no_data=-9999)
-    dem.geotransform = geotr
-    dem_inv = rd.rdarray(dem_inv, no_data=-9999)
-    dem_inv.geotransform = geotr
-    # rd.FillDepressions(dem, in_place=True)
-    # rd.FillDepressions(dem_inv, in_place=True)
-    flow = rd.FlowAccumulation(dem, method="D8")
-    flow_inv = rd.FlowAccumulation(dem_inv, method="D8")
+    for ch, order in (
+        (valley_mask, valley_order),
+        (ridge_mask, ridge_order),
+        (cliff_mask, cliff_order),
+    ):
+        if np.any(ch):
+            ch *= dropout(
+                ch,
+                order,
+                min_size=min_feature_size,
+                min_dropout=min_dropout_rate,
+                max_dropout=max_dropout_rate,
+            )
+            ch += dilation(ch, disk(thickness))
+            ch *= remove_small_objects(ch, min_size=min_feature_size)
+            ch += gaussian_filter(ch, sigma=line_sigma)
 
-    valleys = process_flow(flow, high_percentile, low_percentile)
-    valleys = skeleton(valleys)
-    valleys = clean(
-        valleys,
-        max_features=max_features,
-    )
-    valleys = ndimage.gaussian_filter(valleys * 10, sigma=line_sigma) + valleys
+    map = np.stack(
+        [
+            np.clip(valley_mask, 0, 1),  # R — valleys
+            np.clip(ridge_mask, 0, 1),  # G — ridges
+            np.clip(cliff_mask, 0, 1),  # B — cliffs
+        ],
+        axis=-1,
+    ).astype(np.float32)
 
-    slope = rd.TerrainAttribute(dem, attrib="slope_degrees")
-    flat_regions = slope < slope_threshold_flat
-    steep_terrain = slope > slope_threshold_steep
-    dem_norm = dem / dem.max()
-    cliff_edges = feature.canny(dem_norm, sigma=canny_sigma)
-    cliff_edges = cliff_edges & steep_terrain
-    cliff_edges = skeleton(cliff_edges)
-    cliff_edges = clean(
-        cliff_edges,
-        max_features=max_features,
-    )
-    cliff_edges = (
-        ndimage.gaussian_filter(cliff_edges * 10, sigma=line_sigma) + cliff_edges
-    )
-
-    ridges = process_flow(flow_inv, high_percentile, low_percentile)
-    ridges = ridges * (flat_regions == 0)
-    ridges = skeleton(ridges)
-    ridges = clean(
-        ridges,
-        max_features=max_features,
-    )
-    ridges = ndimage.gaussian_filter(ridges * 10, sigma=line_sigma) + ridges
-
-    return valleys, ridges, cliff_edges, flat_regions
+    return map, flat_mask
 
 
 def get_map_combined(
@@ -151,29 +159,40 @@ def get_map_combined(
     canny_sigma=2,
     blur_sigma=2,
     slope_threshold_steep=20.0,
-    slope_threshold_flat=5,
-    high_percentile=99.1,
-    low_percentile=94.0,
+    slope_threshold_flat=10,
+    high_percentile=99.8,
+    low_percentile=80.0,
     max_features=10,
     line_sigma=0.2,
 ):
-    valleys, ridges, cliff, flat_regions = get_maps(
-        dem,
-        dem_size=dem_size,
-        canny_sigma=canny_sigma,
-        blur_sigma=blur_sigma,
-        slope_threshold_steep=slope_threshold_steep,
-        slope_threshold_flat=slope_threshold_flat,
-        high_percentile=high_percentile,
-        low_percentile=int(low_percentile),
-        max_features=max_features,
-    )
+    gaussian_sigma = random.uniform(1.0, 2.5)
+    flow_acc_percentile = random.uniform(98.0, 99.9)
+    n_strahler_orders = random.randint(5, 8)
+    canny_sigma = random.uniform(1.0, 2.5)
+    canny_low_threshold = random.uniform(0.03, 0.07)
+    canny_high_threshold = random.uniform(0.12, 0.18)
+    cliff_slope_percentile = random.uniform(70.0, 80.0)
+    flat_slope_percentile = random.uniform(15.0, 25.0)
+    thickness = random.randint(3, 6)
+    min_feature_size = random.randint(60, 120)
+    line_sigma = random.uniform(0.15, 0.3)
+    min_dropout_rate = random.uniform(0.15, 0.25)
+    max_dropout_rate = random.uniform(0.7, 0.9)
 
-    map_combined = np.zeros((dem.shape[0], dem.shape[1], 3))
-    valleys = valleys > 0
-    ridges = ridges > 0
-    cliff = cliff > 0
-    map_combined[:, :, 2] = valleys
-    map_combined[:, :, 0] = ridges
-    map_combined[:, :, 1] = cliff
-    return map_combined, flat_regions
+    maps, flat = extract_terrain_features(
+        dem,
+        # gaussian_sigma=gaussian_sigma,
+        # flow_acc_percentile=flow_acc_percentile,
+        # n_strahler_orders=n_strahler_orders,
+        # canny_sigma=canny_sigma,
+        # canny_low_threshold=canny_low_threshold,
+        # canny_high_threshold=canny_high_threshold,
+        # cliff_slope_percentile=cliff_slope_percentile,
+        # flat_slope_percentile=flat_slope_percentile,
+        thickness=thickness,
+        min_feature_size=min_feature_size,
+        line_sigma=line_sigma,
+        min_dropout_rate=min_dropout_rate,
+        max_dropout_rate=max_dropout_rate,
+    )
+    return maps, flat

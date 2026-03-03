@@ -7,13 +7,17 @@ import PIL.Image as PILImage
 import torch
 from rasterio.io import MemoryFile
 
+from dataset.feature_map import get_map_combined
 
-def norm(data):
+
+def norm(data, center=True):
     lo, hi = data.min(), data.max()
     denom = hi - lo
     if denom < 1e-8:
         return np.zeros_like(data, dtype=np.float32)
-    return (data - lo) / denom * 2.0 - 1.0
+    if center:
+        return ((data - lo) / denom) * 2.0 - 1.0
+    return (data - lo) / denom
 
 
 def decode_feature(batch, width=768, height=768):
@@ -26,7 +30,7 @@ def decode_feature(batch, width=768, height=768):
         arr = np.pad(arr, (0, pad_width), mode="constant")
     arr = arr.reshape((356, 356, 3))
     arr = cv2.resize(arr, (width, height), interpolation=cv2.INTER_LINEAR)
-    result = norm(arr)
+    result = norm(arr, center=False)
 
     del arr
     return result
@@ -41,24 +45,30 @@ def decode_img(batch, width=768, height=768):
         del img_band
 
         arr = cv2.resize(arr, (width, height), interpolation=cv2.INTER_LINEAR)
-        arr = norm(arr)
         bands.append(arr)
         del arr
 
     arr_rgb = np.stack(bands, axis=-1)
     arr_rgb = cv2.resize(arr_rgb, (width, height), interpolation=cv2.INTER_LINEAR)
+    arr_rgb = norm(arr_rgb)
     del bands
     return arr_rgb
 
 
-def decode_dem(batch, width=768, height=768):
+def decode_dem(batch, width=768, height=768, lower_bound=None, upper_bound=None):
     with MemoryFile(batch["DEM"]) as mem_f:
         with mem_f.open(driver="GTiff") as f:
             dem = f.read(1)
 
     dem = dem.astype(np.float32)
     dem = cv2.resize(dem, (width, height), interpolation=cv2.INTER_LINEAR)
-    result = norm(dem)
+
+    if lower_bound is not None and upper_bound is not None:
+        result = np.clip(
+            ((dem - lower_bound) / (upper_bound - lower_bound)) * 2.0 - 1.0, -1.5, 1.5
+        )
+    else:
+        result = norm(dem)
 
     del dem
     return result
@@ -75,10 +85,19 @@ def decode_cloud_cover(batch, width=768, height=768):
     return img_arr
 
 
-def preprocess(batch, proportion_empty_prompts, tokenizer, width, height):
+def preprocess(
+    batch,
+    tokenizer,
+    width,
+    height,
+    proportion_empty_prompts=0,
+    lower_bound=None,
+    upper_bound=None,
+    generate_features=False,
+    **kwargs,
+):
     batch_size = len(batch)
 
-    # Preallocate tensors
     imgs = torch.zeros((batch_size, 3, height, width), dtype=torch.float32)
     dems = torch.zeros((batch_size, 3, height, width), dtype=torch.float32)
     fmaps = torch.zeros((batch_size, 3, height, width), dtype=torch.float32)
@@ -92,17 +111,28 @@ def preprocess(batch, proportion_empty_prompts, tokenizer, width, height):
         del img_arr
 
         # Process DEM
-        dem_arr = decode_dem(data, width, height)
+        dem_arr = decode_dem(data, width, height, lower_bound, upper_bound)
         dem_tensor = torch.from_numpy(dem_arr).unsqueeze(0)
         dems[idx] = dem_tensor.expand(3, -1, -1)
-        del dem_arr, dem_tensor
+        del dem_tensor
 
         # Process feature map
-        fmap_arr = decode_feature(data, width, height)
-        fmaps[idx] = torch.from_numpy(fmap_arr).permute(2, 0, 1)
-        del fmap_arr
-
-        # Process cloud cover mask (0-1, where 1 = cloud)
+        if generate_features:
+            fmaps[idx] = torch.zeros((3, height, width), dtype=torch.float32)
+            print(kwargs)
+            feature_map, _ = get_map_combined(dem_arr * 1000, dem_size=width, **kwargs)
+            feature_map = cv2.resize(
+                feature_map, (width, height), interpolation=cv2.INTER_LINEAR
+            )
+            feature_map = np.clip(feature_map, 0, 1)
+            fmaps[idx] = torch.from_numpy(feature_map).permute(2, 0, 1)
+            del feature_map
+        else:
+            fmap_arr = decode_feature(data, width, height)
+            fmaps[idx] = torch.from_numpy(fmap_arr).permute(2, 0, 1)
+            del fmap_arr
+        del dem_arr
+        # Process cloud cover mask
         cloud_arr = decode_cloud_cover(data, width, height)
         cloud_masks[idx] = (
             torch.from_numpy(cloud_arr).unsqueeze(0)

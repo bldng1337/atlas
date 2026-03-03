@@ -35,4 +35,5 @@ dependencies = [
     "xformers>=0.0.32.post2",
     "torchvision>=0.23.0",
     "richdem>=0.3.4",
+    "pyflwdir>=0.5.10",
 ]

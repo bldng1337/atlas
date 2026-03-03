@@ -1,0 +1,12 @@
+{
+	"streaming": true,
+	"train_batch_size": 4,
+	"gradient_checkpointing": true,
+	"gradient_accumulation_steps": 2,
+	"mixed_precision": "bf16",
+	"use_8bitadam": true,
+	"tf32": true,
+	"num_workers": 2,
+	"seed": 42,
+	"resume_from_checkpoint": "latest"
+}

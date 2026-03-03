@@ -1,0 +1,11 @@
+{
+  "streaming": true,
+	"train_batch_size": 8,
+	"gradient_accumulation_steps": 1,
+	"gradient_checkpointing": false,
+	"mixed_precision": "bf16",
+	"use_8bitadam": true,
+	"xformer": false,
+	"seed": 42,
+	"resume_from_checkpoint": "latest"
+}

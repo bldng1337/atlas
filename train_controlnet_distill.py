@@ -1,13 +1,8 @@
 import csv
-import functools
 import os
-import random
-import sys
-from typing import List, Optional, cast
+from typing import List
 
-import numpy as np
 import torch
-import torch.nn.functional as F
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
@@ -15,331 +10,61 @@ from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.optimization import SchedulerType, get_scheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.training_utils import EMAModel
-from diffusers.utils.torch_utils import randn_tensor
-from huggingface_hub import snapshot_download
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
-import pipeline_terrain
-from dataset.feature_map import get_map_combined
 from models import ControlNetDEMModel, UNetDEMConditionModel
 from pipeline_terrain import TerrainDiffusionPipeline
+from train_utils import (
+    generate_synthetic_batch,
+    log_validation_controlnet,
+    parse_args,
+    train_controlnet, augment_batch,
+)
 
 mesa_path = "NewtNewt/MESA"
-prompts_csv_path = "./weights/prompts.csv"
+prompts_csv_path = "./prompts.csv"
 gradient_checkpointing = True
 tf32 = True
 learning_rate = 1e-5
 gradient_accumulation_steps = 16
 train_batch_size = 1
 use_8bitadam = True
-lr_warmup_steps = 500
+lr_warmup_steps = 600
 max_train_steps = 20000
 lr_num_cycles = 1
 lr_power = 1.0
-scheduler_type = "LINEAR"
+scheduler_type = "constant_with_warmup"
 max_grad_norm = 1.0
 set_grads_to_none = True
-project_dir = "./outputs_controlnet"
-logging_dir = "./logs_controlnet"
-output_dir = "./outputs_controlnet/checkpoints"
+project_dir = "./outputs"
+logging_dir = "./logs"
+output_dir = "./outputs/checkpoints"
 checkpointing_steps = 1000
 validation_steps = 1000
 proportion_empty_prompts = 0.2
 mixed_precision = "bf16"
 seed = 42
-use_ema = True
+use_ema = False
 ema_decay = 0.9999
 xformer = True
 resume_from_checkpoint = None
 conditioning_scale = 1.0
 
-
-num_inference_steps_gen = 12
+enable_random_crop = False
+crop_scale = 0.8
+enable_random_flip = False
+flip_horizontal_prob = 0.5
+flip_vertical_prob = 0.5
+enable_channel_drop = False
+channel_drop_prob = 0.25
+enable_feature_dropout = False
+feature_dropout_prob = 0.1
+num_inference_steps_gen = 7
 guidance_scale_gen = 7.5
 
 
-def log_validation(
-    unet,
-    controlnet,
-    vae,
-    text_encoder,
-    tokenizer,
-    scheduler,
-    accelerator,
-    feature_map,
-    weight_dtype,
-    height,
-    width,
-    step,
-    terrain_pipeline=None,
-    gen_prompts=None,
-    generator=None,
-    num_random_validations=3,
-):
-    logger = get_logger(__name__)
-    logger.info("Running validation...")
-
-    unet.eval()
-    controlnet.eval()
-    vae.eval()
-    text_encoder.eval()
-
-    def run_inference(prompt, feature_map, val_scheduler, vae_scale_factor):
-        text_input = tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-        )
-        prompt_embeds = text_encoder(
-            text_input.input_ids.to(accelerator.device),
-        )[0]
-
-        negative_prompt = ""
-        uncond_input = tokenizer(
-            negative_prompt,
-            padding="max_length",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-        )
-        negative_prompt_embeds = text_encoder(
-            uncond_input.input_ids.to(accelerator.device),
-        )[0]
-
-        prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
-        prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
-
-        latents = randn_tensor(
-            (
-                1,
-                unet.config["in_channels"] * 2,
-                int(height) // vae_scale_factor,
-                int(width) // vae_scale_factor,
-            ),
-            generator=None,
-            device=accelerator.device,
-            dtype=weight_dtype,
-        )
-        latents = latents * val_scheduler.init_noise_sigma
-
-        controlnet_cond = torch.cat([feature_map] * 2, dim=0).to(
-            accelerator.device, dtype=weight_dtype
-        )
-
-        for t in tqdm(val_scheduler.timesteps, desc=f"Validation: {prompt[:30]}"):
-            latent_model_input = torch.cat([latents] * 2)
-            latent_model_input = val_scheduler.scale_model_input(latent_model_input, t)
-
-            down_block_res_samples, mid_block_res_sample = controlnet(
-                latent_model_input,
-                t,
-                encoder_hidden_states=prompt_embeds,
-                controlnet_cond=controlnet_cond,
-                conditioning_scale=conditioning_scale,
-            )
-
-            noise_pred = unet(
-                latent_model_input,
-                t,
-                encoder_hidden_states=prompt_embeds,
-                down_block_additional_residuals=[
-                    s.to(dtype=weight_dtype) for s in down_block_res_samples
-                ],
-                mid_block_additional_residual=mid_block_res_sample.to(
-                    dtype=weight_dtype
-                ),
-            ).sample
-
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            guidance_scale = 7.5
-            noise_pred = noise_pred_uncond + guidance_scale * (
-                noise_pred_text - noise_pred_uncond
-            )
-
-            latents = val_scheduler.step(noise_pred, t, latents).prev_sample
-
-        img_latents = latents[:, :4]
-        dem_latents = latents[:, 4:]
-
-        img_latents = img_latents / vae.config["scaling_factor"]
-        dem_latents = dem_latents / vae.config["scaling_factor"]
-
-        image = vae.decode(img_latents, return_dict=False)[0]
-        dem = vae.decode(dem_latents, return_dict=False)[0]
-
-        image = (image / 2 + 0.5).clamp(0, 1)
-        dem = (dem / 2 + 0.5).clamp(0, 1)
-
-        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
-        dem = dem.cpu().permute(0, 2, 3, 1).float().numpy()
-
-        return image, dem, feature_map
-
-    def create_overlay(dem, feature_map, alpha=0.4):
-        if dem.max() > 1.0:
-            dem = dem / dem.max()
-
-        feature_map_normalized = feature_map.copy()
-        fmin = feature_map_normalized.min()
-        fmax = feature_map_normalized.max()
-        if fmax > fmin:
-            feature_map_normalized = (feature_map_normalized - fmin) / (fmax - fmin)
-
-        overlay = dem * (1 - alpha) + feature_map_normalized * alpha
-        overlay = np.clip(overlay, 0, 1)
-
-        return overlay
-
-    vae_scale_factor = 2 ** (len(vae.config["block_out_channels"]) - 1)
-    val_scheduler = cast(DDIMScheduler, DDIMScheduler.from_config(scheduler.config))
-    val_scheduler.set_timesteps(25, device=accelerator.device)
-
-    with torch.no_grad():
-        logger.info("Running static validation...")
-        feature_map_static = feature_map[:1].to(
-            device=accelerator.device, dtype=weight_dtype
-        )
-        prompt_static = "rain forests and mountains in Philippines in November"
-
-        image_static, dem_static, feature_map_static_viz = run_inference(
-            prompt_static, feature_map_static, val_scheduler, vae_scale_factor
-        )
-
-        feature_map_static_np = feature_map_static_viz[0].cpu().float().numpy()
-        feature_map_static_np = feature_map_static_np.transpose(1, 2, 0)
-        overlay_static = create_overlay(dem_static, feature_map_static_np, alpha=0.4)
-
-        if accelerator.is_main_process:
-            tracker = accelerator.get_tracker("tensorboard")
-            if tracker:
-                tracker.writer.add_images(
-                    "validation/static/img", image_static, step, dataformats="NHWC"
-                )
-                tracker.writer.add_images(
-                    "validation/static/dem", dem_static, step, dataformats="NHWC"
-                )
-                tracker.writer.add_images(
-                    "validation/static/overlay",
-                    overlay_static,
-                    step,
-                    dataformats="NHWC",
-                )
-
-                feature_map_static_normalized = feature_map_static_np
-                fmin = feature_map_static_normalized.min()
-                fmax = feature_map_static_normalized.max()
-                if fmax > fmin:
-                    feature_map_static_normalized = (
-                        feature_map_static_normalized - fmin
-                    ) / (fmax - fmin)
-                feature_map_static_normalized = np.expand_dims(
-                    feature_map_static_normalized, axis=0
-                )
-                tracker.writer.add_images(
-                    "validation/static/feature_map",
-                    feature_map_static_normalized,
-                    step,
-                    dataformats="NHWC",
-                )
-
-        if (
-            terrain_pipeline is not None
-            and gen_prompts is not None
-            and num_random_validations > 0
-        ):
-            logger.info(f"Running {num_random_validations} random validations...")
-            for i in range(num_random_validations):
-                random_prompt = random.choice(gen_prompts)
-
-                random_batch = generate_synthetic_batch(
-                    pipeline=terrain_pipeline,
-                    vae=vae,
-                    tokenizer=tokenizer,
-                    text_encoder=text_encoder,
-                    prompts=[random_prompt],
-                    batch_size=1,
-                    height=height,
-                    width=width,
-                    weight_dtype=weight_dtype,
-                    device=accelerator.device,
-                    generator=generator,
-                )
-
-                feature_map_random = random_batch["feature_map"].to(
-                    accelerator.device, dtype=weight_dtype
-                )
-
-                image_random, dem_random, feature_map_random_viz = run_inference(
-                    random_prompt, feature_map_random, val_scheduler, vae_scale_factor
-                )
-
-                feature_map_random_np = feature_map_random_viz[0].cpu().float().numpy()
-                feature_map_random_np = feature_map_random_np.transpose(1, 2, 0)
-                overlay_random = create_overlay(
-                    dem_random, feature_map_random_np, alpha=0.4
-                )
-
-                if accelerator.is_main_process:
-                    tracker = accelerator.get_tracker("tensorboard")
-                    if tracker:
-                        tracker.writer.add_text(
-                            f"validation/random_{i}/prompt", random_prompt, step
-                        )
-                        tracker.writer.add_images(
-                            f"validation/random_{i}/img",
-                            image_random,
-                            step,
-                            dataformats="NHWC",
-                        )
-                        # tracker.writer.add_images(
-                        #     f"validation/random_{i}/dem",
-                        #     dem_random,
-                        #     step,
-                        #     dataformats="NHWC",
-                        # )
-                        tracker.writer.add_images(
-                            f"validation/random_{i}/overlay",
-                            overlay_random,
-                            step,
-                            dataformats="NHWC",
-                        )
-
-    controlnet.train()
-
-
-def parse_args():
-    """Not perfect but sufficient for now."""
-    args = sys.argv[1:]
-
-    for i in range(0, len(args), 2):
-        if i + 1 < len(args) and args[i].startswith("-"):
-            try:
-                var_name = args[i].lstrip("-")
-                var_value = args[i + 1]
-                if var_name in globals():
-                    original = globals()[var_name]
-                    if isinstance(original, bool):
-                        var_value = var_value.lower() in ("true", "1", "yes")
-                    elif isinstance(original, int):
-                        var_value = int(var_value)
-                    elif isinstance(original, float):
-                        var_value = float(var_value)
-
-                    globals()[var_name] = var_value
-                    print(f"Updated {var_name}: {original} => {var_value}")
-            except Exception as e:
-                print(f"Error processing argument {args[i]}")
-                raise e
-        else:
-            var_name = args[i].lstrip("-")
-            print(f"Warning: {var_name} is not a recognized argument.")
-
-
 def load_prompts_from_csv(csv_path: str) -> List[str]:
-    """Load prompts from a CSV file, extracting the 'prompt' column."""
     prompts = []
     with open(csv_path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -350,74 +75,11 @@ def load_prompts_from_csv(csv_path: str) -> List[str]:
     return prompts
 
 
-def generate_synthetic_batch(
-    pipeline: TerrainDiffusionPipeline,
-    vae: AutoencoderKL,
-    tokenizer: CLIPTokenizer,
-    text_encoder: CLIPTextModel,
-    prompts: List[str],
-    batch_size: int,
-    height: int,
-    width: int,
-    weight_dtype: torch.dtype,
-    device: torch.device,
-    generator: Optional[torch.Generator] = None,
-) -> dict:
-    batch_size = min(batch_size, len(prompts))
-
-    sample_size = batch_size
-
-    if generator is None:
-        generator = torch.Generator(device=device)
-
-    indices = torch.randperm(len(prompts), generator=generator)[:sample_size]
-    selected_prompts = [prompts[i] for i in indices.tolist()]
-
-    with torch.no_grad():
-        images, dems = pipeline(
-            prompt=selected_prompts,
-            height=height,
-            width=width,
-            num_inference_steps=num_inference_steps_gen,
-            guidance_scale=guidance_scale_gen,
-            generator=generator,
-            output_type="pt",
-        )
-
-    dems_numpy = dems.float().cpu().numpy() * 1000
-
-    feature_maps = []
-    for i in range(batch_size):
-        dem_numpy = dems_numpy[i].mean(axis=0)
-        feature_map, _ = get_map_combined(dem_numpy, dem_size=width)
-        feature_map_tensor = torch.from_numpy(feature_map).permute(2, 0, 1).float()
-        feature_maps.append(feature_map_tensor)
-
-    feature_maps = torch.stack(feature_maps).to(device=device, dtype=torch.float32)
-
-    txts = tokenizer(
-        selected_prompts,
-        padding="max_length",
-        max_length=tokenizer.model_max_length,
-        truncation=True,
-        return_tensors="pt",
-    ).input_ids.to(device=device)
-
-    return {
-        "img": images,
-        "dem": dems,
-        "feature_map": feature_maps,
-        "txt": txts,
-    }
-
-
 def main():
-    parse_args()
-
     os.makedirs(project_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(logging_dir, exist_ok=True)
-    scheduler = SchedulerType[scheduler_type]
+    scheduler = SchedulerType[scheduler_type.upper()]
     accelerator_project_config = ProjectConfiguration(
         project_dir=project_dir,
         logging_dir=logging_dir,
@@ -430,10 +92,10 @@ def main():
         project_config=accelerator_project_config,
         log_with="tensorboard",
     )
-    set_seed(seed)
 
     generator = torch.Generator(device="cpu")
-    generator.manual_seed(seed)
+    generator.manual_seed(seed + accelerator.process_index)
+    set_seed(seed)
 
     noise_scheduler = DDIMScheduler.from_pretrained(mesa_path, subfolder="scheduler")
     text_encoder = CLIPTextModel.from_pretrained(mesa_path, subfolder="text_encoder")
@@ -445,11 +107,11 @@ def main():
         vae=vae,
         text_encoder=text_encoder,
         tokenizer=tokenizer,
-        unet=unet,
-        scheduler=noise_scheduler,
-        safety_checker=None,
-        feature_extractor=None,
-        image_encoder=None,
+        unet=unet,  # ty:ignore[invalid-argument-type]
+        scheduler=noise_scheduler,  # ty:ignore[invalid-argument-type]
+        safety_checker=None,  # ty:ignore[invalid-argument-type]
+        feature_extractor=None,  # ty:ignore[invalid-argument-type]
+        image_encoder=None,  # ty:ignore[invalid-argument-type]
         requires_safety_checker=False,
     )
 
@@ -460,8 +122,6 @@ def main():
     )
 
     terrain_pipeline = terrain_pipeline.to(accelerator.device)
-
-    prompts_csv_path = os.path.join("./prompts.csv")
 
     if os.path.exists(prompts_csv_path):
         logger.info(f"Loading prompts from {prompts_csv_path}...")
@@ -593,14 +253,50 @@ def main():
     logger.info(f"  Mixed precision = {mixed_precision}")
     logger.info("  Using synthetic data generation")
 
+    global resume_from_checkpoint
+
     if accelerator.is_main_process:
         accelerator.init_trackers("controlnet-training-distill")
+        tracker = accelerator.get_tracker("tensorboard")
+        if tracker:
+            config_dict = {
+                "mesa_path": mesa_path,
+                "gradient_checkpointing": gradient_checkpointing,
+                "tf32": tf32,
+                "learning_rate": learning_rate,
+                "gradient_accumulation_steps": gradient_accumulation_steps,
+                "train_batch_size": train_batch_size,
+                "use_8bitadam": use_8bitadam,
+                "lr_warmup_steps": lr_warmup_steps,
+                "max_train_steps": max_train_steps,
+                "lr_num_cycles": lr_num_cycles,
+                "lr_power": lr_power,
+                "scheduler_type": scheduler_type,
+                "max_grad_norm": max_grad_norm,
+                "set_grads_to_none": set_grads_to_none,
+                "project_dir": project_dir,
+                "logging_dir": logging_dir,
+                "output_dir": output_dir,
+                "checkpointing_steps": checkpointing_steps,
+                "validation_steps": validation_steps,
+                "proportion_empty_prompts": proportion_empty_prompts,
+                "mixed_precision": mixed_precision,
+                "seed": seed,
+                "use_ema": use_ema,
+                "ema_decay": ema_decay,
+                "xformer": xformer,
+                "resume_from_checkpoint": resume_from_checkpoint,
+                "conditioning_scale": conditioning_scale,
+                "num_inference_steps_gen": num_inference_steps_gen,
+                "guidance_scale_gen": guidance_scale_gen,
+            }
+            config_str = "\n".join([f"{k}: {v}" for k, v in config_dict.items()])
+            tracker.writer.add_text("config", config_str, 0)
 
     global_step = 0
 
     initial_global_step = 0
 
-    global resume_from_checkpoint
     if resume_from_checkpoint is not None:
         path = None
         if resume_from_checkpoint == "latest":
@@ -632,13 +328,13 @@ def main():
 
     initial_batch = generate_synthetic_batch(
         pipeline=terrain_pipeline,
-        vae=vae,
         tokenizer=tokenizer,
-        text_encoder=text_encoder,
         prompts=gen_prompts,
         batch_size=1,
         height=height,
         width=width,
+        num_inference_steps=num_inference_steps_gen,
+        guidance_scale=guidance_scale_gen,
         weight_dtype=weight_dtype,
         device=accelerator.device,
         generator=generator,
@@ -656,24 +352,26 @@ def main():
     with torch.no_grad():
         empty_prompt_embeds = text_encoder(empty_token_ids)[0].to(dtype=weight_dtype)
 
-    log_validation(
-        unet,
-        controlnet,
-        vae,
-        text_encoder,
-        tokenizer,
-        noise_scheduler,
-        accelerator,
-        validation_feature,
-        weight_dtype,
-        height,
-        width,
-        global_step,
-        terrain_pipeline=terrain_pipeline,
-        gen_prompts=gen_prompts,
-        generator=generator,
-        num_random_validations=1,
-    )
+    if accelerator.is_main_process:
+        log_validation_controlnet(
+            unet,
+            controlnet,
+            vae,
+            text_encoder,
+            tokenizer,
+            noise_scheduler,
+            accelerator,
+            validation_feature,
+            weight_dtype,
+            height,
+            width,
+            global_step,
+            terrain_pipeline=terrain_pipeline,
+            gen_prompts=gen_prompts,
+            generator=generator,
+            num_random_validations=1,
+            conditioning_scale=conditioning_scale,
+        )
 
     if global_step == 0:
         accelerator.save_state(os.path.join(output_dir, f"checkpoint-{global_step}"))
@@ -681,19 +379,31 @@ def main():
             f"Saved initial state to {os.path.join(output_dir, f'checkpoint-{global_step}')}"
         )
 
-    for step in range(max_train_steps - global_step):
+    while global_step < max_train_steps:
         batch = generate_synthetic_batch(
             pipeline=terrain_pipeline,
-            vae=vae,
             tokenizer=tokenizer,
-            text_encoder=text_encoder,
             prompts=gen_prompts,
             batch_size=train_batch_size,
             height=height,
             width=width,
+            guidance_scale=guidance_scale_gen,
+            num_inference_steps=num_inference_steps_gen,
             weight_dtype=weight_dtype,
             device=accelerator.device,
             generator=generator,
+        )
+        batch = augment_batch(
+            batch=batch,
+            enable_random_crop=enable_random_crop,
+            crop_scale=crop_scale,
+            enable_random_flip=enable_random_flip,
+            flip_horizontal_prob=flip_horizontal_prob,
+            flip_vertical_prob=flip_vertical_prob,
+            enable_channel_drop=enable_channel_drop,
+            channel_drop_prob=channel_drop_prob,
+            enable_feature_dropout=enable_feature_dropout,
+            feature_dropout_prob=feature_dropout_prob,
         )
         with accelerator.accumulate(controlnet):
             batch["img"] = batch["img"].to(accelerator.device)
@@ -714,86 +424,31 @@ def main():
 
                 latents = torch.cat([img_latents, dem_latents], dim=1).float()
 
-            noise = torch.randn_like(latents)
-            bsz = latents.shape[0]
-
-            timesteps = torch.randint(
-                0,
-                noise_scheduler.config["num_train_timesteps"],
-                (bsz,),
-                device=latents.device,
-            )
-
-            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-            noisy_latents = noisy_latents.to(dtype=weight_dtype)
-
-            with torch.no_grad():
-                text_inputs = batch["txt"]
-                text_input_ids = text_inputs.to(accelerator.device)
-                prompt_embeds = text_encoder(
-                    text_input_ids,
-                )[0]
-
-            prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
-
-            if proportion_empty_prompts > 0:
-                random_mask = (
-                    torch.rand(bsz, device=prompt_embeds.device)
-                    < proportion_empty_prompts
-                )
-                for i in range(bsz):
-                    if random_mask[i]:
-                        prompt_embeds[i] = empty_prompt_embeds[0]
-
-            controlnet_cond = batch["feature_map"].to(
-                accelerator.device, dtype=weight_dtype
-            )
-
-            down_block_res_samples, mid_block_res_sample = controlnet(
-                noisy_latents,
-                timesteps,
-                encoder_hidden_states=prompt_embeds,
-                controlnet_cond=controlnet_cond,
+            loss = train_controlnet(
+                latents=latents,
+                controlnet=controlnet,
+                unet=unet,
+                text_encoder=text_encoder,
+                noise_scheduler=noise_scheduler,
+                proportion_empty_prompts=proportion_empty_prompts,
+                batch=batch,
+                empty_prompt_embeds=empty_prompt_embeds,
+                device=accelerator.device,
+                weight_dtype=weight_dtype,
                 conditioning_scale=conditioning_scale,
             )
-
-            model_pred = unet(
-                noisy_latents,
-                timesteps,
-                encoder_hidden_states=prompt_embeds,
-                down_block_additional_residuals=[
-                    s.to(dtype=weight_dtype) for s in down_block_res_samples
-                ],
-                mid_block_additional_residual=mid_block_res_sample.to(
-                    dtype=weight_dtype
-                ),
-            ).sample
-
-            if noise_scheduler.config["prediction_type"] == "epsilon":
-                target = noise
-            elif noise_scheduler.config["prediction_type"] == "v_prediction":
-                target = noise_scheduler.get_velocity(latents, noise, timesteps)
-            else:
-                raise ValueError(
-                    f"Unknown prediction type {noise_scheduler.config['prediction_type']}"
-                )
-
-            mse = (model_pred.float() - target.float()) ** 2
-            loss = mse.mean()
 
             accelerator.backward(loss)
             if accelerator.sync_gradients:
                 params_to_clip = controlnet.parameters()
                 accelerator.clip_grad_norm_(params_to_clip, max_grad_norm)
-                if use_ema:
-                    ema_controlnet.step(
-                        accelerator.unwrap_model(controlnet).parameters()
-                    )
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad(set_to_none=set_grads_to_none)
 
         if accelerator.sync_gradients:
+            if use_ema:
+                ema_controlnet.step(accelerator.unwrap_model(controlnet).parameters())
             progress_bar.update(1)
             global_step += 1
 
@@ -813,35 +468,37 @@ def main():
             accelerator.log(logs, step=global_step)
 
             if global_step % validation_steps == 0:
-                if use_ema:
-                    ema_controlnet.store(
-                        accelerator.unwrap_model(controlnet).parameters()
+                if accelerator.is_main_process:
+                    if use_ema:
+                        ema_controlnet.store(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
+                        ema_controlnet.copy_to(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
+                    log_validation_controlnet(
+                        unet,
+                        controlnet,
+                        vae,
+                        text_encoder,
+                        tokenizer,
+                        noise_scheduler,
+                        accelerator,
+                        validation_feature,
+                        weight_dtype,
+                        height,
+                        width,
+                        global_step,
+                        terrain_pipeline=terrain_pipeline,
+                        gen_prompts=gen_prompts,
+                        generator=generator,
+                        num_random_validations=1,
+                        conditioning_scale=conditioning_scale,
                     )
-                    ema_controlnet.copy_to(
-                        accelerator.unwrap_model(controlnet).parameters()
-                    )
-                log_validation(
-                    unet,
-                    controlnet,
-                    vae,
-                    text_encoder,
-                    tokenizer,
-                    noise_scheduler,
-                    accelerator,
-                    validation_feature,
-                    weight_dtype,
-                    height,
-                    width,
-                    global_step,
-                    terrain_pipeline=terrain_pipeline,
-                    gen_prompts=gen_prompts,
-                    generator=generator,
-                    num_random_validations=1,
-                )
-                if use_ema:
-                    ema_controlnet.restore(
-                        accelerator.unwrap_model(controlnet).parameters()
-                    )
+                    if use_ema:
+                        ema_controlnet.restore(
+                            accelerator.unwrap_model(controlnet).parameters()
+                        )
 
             if global_step >= max_train_steps:
                 if use_ema:
@@ -863,4 +520,5 @@ def main():
 
 
 if __name__ == "__main__":
+    parse_args(globals())
     main()
