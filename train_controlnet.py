@@ -19,7 +19,7 @@ from train_utils import (
     augment_batch,
     log_validation_controlnet,
     parse_args,
-    train_controlnet,
+    train_controlnet, use_canny_feature,
 )
 
 dataset_path = "bldng/atlas2"
@@ -294,18 +294,19 @@ def main():
 
     for epoch in range(first_epoch, num_train_epochs):
         for step, batch in enumerate(train_dataloader):
-            batch = augment_batch(
-                batch=batch,
-                enable_random_crop=enable_random_crop,
-                crop_scale=crop_scale,
-                enable_random_flip=enable_random_flip,
-                flip_horizontal_prob=flip_horizontal_prob,
-                flip_vertical_prob=flip_vertical_prob,
-                enable_channel_drop=enable_channel_drop,
-                channel_drop_prob=channel_drop_prob,
-                enable_feature_dropout=enable_feature_dropout,
-                feature_dropout_prob=feature_dropout_prob,
-            )
+            # batch = augment_batch(
+            #     batch=batch,
+            #     enable_random_crop=enable_random_crop,
+            #     crop_scale=crop_scale,
+            #     enable_random_flip=enable_random_flip,
+            #     flip_horizontal_prob=flip_horizontal_prob,
+            #     flip_vertical_prob=flip_vertical_prob,
+            #     enable_channel_drop=enable_channel_drop,
+            #     channel_drop_prob=channel_drop_prob,
+            #     enable_feature_dropout=enable_feature_dropout,
+            #     feature_dropout_prob=feature_dropout_prob,
+            # )
+            batch=use_canny_feature(batch)
 
             with accelerator.accumulate(controlnet):
                 batch["img"] = batch["img"].to(accelerator.device, dtype=weight_dtype)

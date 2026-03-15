@@ -6,6 +6,7 @@
 	"mixed_precision": "bf16",
 	"use_8bitadam": true,
 	"xformer": false,
+	"num_workers": 2,
 	"seed": 42,
 	"resume_from_checkpoint": "latest"
 }

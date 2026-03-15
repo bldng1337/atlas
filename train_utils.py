@@ -4,7 +4,7 @@ import os
 import random
 import sys
 from typing import List, Optional, cast
-
+import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -127,6 +127,7 @@ def parse_args(config: dict):
         else:
             var_name = args[i].lstrip("-")
             print(f"Warning: {var_name} is not a valid argument.")
+
 
 
 def generate_synthetic_batch(
@@ -551,6 +552,25 @@ def train_controlnet(
     loss = mse.mean()
     return loss
 
+def use_canny_feature(batch: dict) -> dict:
+    if "feature_map" not in batch:
+        return batch
+
+    feature_map = cast(Tensor, batch["dem"])
+    B = feature_map.shape[0]
+    results = []
+    shape = feature_map.shape
+    np_imgs = (feature_map.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
+
+    for i in range(B):
+        gray = cv2.cvtColor(np_imgs[i], cv2.COLOR_RGB2GRAY)
+        low=np.percentile(gray, 30)
+        high=np.percentile(gray, 70)
+        edges = cv2.Canny(gray, low, high)
+        results.append(torch.from_numpy(np.stack([edges, edges, edges])).float() / 255.0)
+    batch["feature_map"] = torch.stack(results).to(feature_map.device)
+    assert batch["feature_map"].shape == shape, f"Expected shape {shape}, got {batch['feature_map'].shape}"
+    return batch
 
 def augment_batch(
     batch: dict,
@@ -600,11 +620,15 @@ def augment_batch(
             feature_map = torch.flip(feature_map, dims=[-1])
             img = torch.flip(img, dims=[-1])
             dem = torch.flip(dem, dims=[-1])
+            if cloud_mask is not None:
+                cloud_mask = torch.flip(cloud_mask, dims=[-1])
 
         if random.random() < flip_vertical_prob:
             feature_map = torch.flip(feature_map, dims=[-2])
             img = torch.flip(img, dims=[-2])
             dem = torch.flip(dem, dims=[-2])
+            if cloud_mask is not None:
+                cloud_mask = torch.flip(cloud_mask, dims=[-2])
 
     if enable_channel_drop:
         drop_mask = torch.rand((bsz, num_channels), device=device) < channel_drop_prob
