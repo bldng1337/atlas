@@ -1,12 +1,12 @@
 {
   "streaming": true,
-	"train_batch_size": 8,
-	"gradient_accumulation_steps": 1,
-	"gradient_checkpointing": false,
+	"train_batch_size": 6,
+	"gradient_accumulation_steps": 2,
+	"gradient_checkpointing": true,
 	"mixed_precision": "bf16",
 	"use_8bitadam": true,
-	"xformer": false,
-	"num_workers": 2,
+	"xformer": true,
+	"num_workers": 1,
 	"seed": 42,
 	"resume_from_checkpoint": "latest"
 }

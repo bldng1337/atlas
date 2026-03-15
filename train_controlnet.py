@@ -262,6 +262,7 @@ def main():
     )
 
     map_batch = next(iter(train_dataloader))
+    map_batch=use_canny_feature(map_batch)
     validation_feature = map_batch["feature_map"].to(
         accelerator.device, dtype=weight_dtype
     )
