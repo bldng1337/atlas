@@ -23,7 +23,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from skimage.morphology import dilation, disk
 from dataset.feature_map import get_map_combined
 from models import ControlNetDEMModel, UNetDEMConditionModel
-from pipeline_terrain import TerrainDiffusionPipeline
+from pipeline_terrain import TerrainDiffusionPipeline, TerrainDiffusionControlNetPipeline
 
 
 def parse_args(config: dict):
@@ -209,6 +209,8 @@ def log_validation_controlnet(
     terrain_pipeline=None,
     gen_prompts=None,
     generator=None,
+    num_inference_steps=50,
+    guidance_scale=7.5,
     num_random_validations=3,
     conditioning_scale=1.0,
 ):
@@ -219,99 +221,37 @@ def log_validation_controlnet(
     controlnet.eval()
     vae.eval()
     text_encoder.eval()
+    pipeline = TerrainDiffusionControlNetPipeline(
+        vae=vae,
+        controlnet=controlnet,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        unet=unet,
+        scheduler=scheduler,
+        safety_checker=None,  # ty:ignore[invalid-argument-type]
+        feature_extractor=None,  # ty:ignore[invalid-argument-type]
+        image_encoder=None,  # ty:ignore[invalid-argument-type]
+        requires_safety_checker=False,
+    )
 
-    def run_inference(prompt, feature_map, val_scheduler, vae_scale_factor):
-        text_input = tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-        )
-        prompt_embeds = text_encoder(
-            text_input.input_ids.to(accelerator.device),
-        )[0]
-
-        negative_prompt = ""
-        uncond_input = tokenizer(
-            negative_prompt,
-            padding="max_length",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-        )
-        negative_prompt_embeds = text_encoder(
-            uncond_input.input_ids.to(accelerator.device),
-        )[0]
-
-        prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
-        prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
-
-        latents = randn_tensor(
-            (
-                1,
-                unet.config["in_channels"] * 2,
-                int(height) // vae_scale_factor,
-                int(width) // vae_scale_factor,
-            ),
-            generator=None,
-            device=accelerator.device,
-            dtype=weight_dtype,
-        )
-        latents = latents * val_scheduler.init_noise_sigma
-
-        controlnet_cond = torch.cat([feature_map] * 2, dim=0).to(
-            accelerator.device, dtype=weight_dtype
-        )
-
-        for t in tqdm(val_scheduler.timesteps, desc=f"Validation: {prompt[:30]}"):
-            latent_model_input = torch.cat([latents] * 2)
-            latent_model_input = val_scheduler.scale_model_input(latent_model_input, t)
-
-            down_block_res_samples, mid_block_res_sample = controlnet(
-                latent_model_input,
-                t,
-                encoder_hidden_states=prompt_embeds,
-                controlnet_cond=controlnet_cond,
+    def run_inference(prompt, feature_map):
+        with torch.no_grad():
+            image, dem = pipeline(
+                controlnet_cond=feature_map,
                 conditioning_scale=conditioning_scale,
+                prompt=prompt,
+                height=height,
+                width=width,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                generator=generator,
+                output_type="pt",
             )
-
-            noise_pred = unet(
-                latent_model_input,
-                t,
-                encoder_hidden_states=prompt_embeds,
-                down_block_additional_residuals=[
-                    s.to(dtype=weight_dtype) for s in down_block_res_samples
-                ],
-                mid_block_additional_residual=mid_block_res_sample.to(
-                    dtype=weight_dtype
-                ),
-            ).sample
-
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            guidance_scale = 7.5
-            noise_pred = noise_pred_uncond + guidance_scale * (
-                noise_pred_text - noise_pred_uncond
-            )
-
-            latents = val_scheduler.step(noise_pred, t, latents).prev_sample
-
-        img_latents = latents[:, :4]
-        dem_latents = latents[:, 4:]
-
-        img_latents = img_latents / vae.config["scaling_factor"]
-        dem_latents = dem_latents / vae.config["scaling_factor"]
-
-        image = vae.decode(img_latents, return_dict=False)[0]
-        dem = vae.decode(dem_latents, return_dict=False)[0]
-
-        image = (image / 2 + 0.5).clamp(0, 1)
-        dem = (dem / 2 + 0.5).clamp(0, 1)
-
-        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
-        dem = dem.cpu().permute(0, 2, 3, 1).float().numpy()
-
-        return image, dem, feature_map
+            dem=dem.float().cpu().numpy()
+            dem = dem[0].transpose(1, 2, 0)
+            image=image.float().cpu().numpy()
+            image = image[0].transpose(1, 2, 0)
+        return image, dem
 
     def create_overlay(dem, feature_map, alpha=0.4):
         feature_map_normalized = feature_map.copy()
@@ -325,22 +265,18 @@ def log_validation_controlnet(
 
         return overlay
 
-    vae_scale_factor = 2 ** (len(vae.config["block_out_channels"]) - 1)
-    val_scheduler = cast(DDIMScheduler, DDIMScheduler.from_config(scheduler.config))
-    val_scheduler.set_timesteps(25, device=accelerator.device)
-
     with torch.no_grad():
         logger.info("Running static validation...")
-        feature_map_static = feature_map[:1].to(
+        feature_map_static = feature_map[0].to(
             device=accelerator.device, dtype=weight_dtype
         )
         prompt_static = "rain forests and mountains in Philippines in November"
 
-        image_static, dem_static, feature_map_static_viz = run_inference(
-            prompt_static, feature_map_static, val_scheduler, vae_scale_factor
+        image_static, dem_static = run_inference(
+            prompt_static, feature_map_static
         )
 
-        feature_map_static_np = feature_map_static_viz[0].cpu().float().numpy()
+        feature_map_static_np = feature_map_static.cpu().float().numpy()
         feature_map_static_np = feature_map_static_np.transpose(1, 2, 0)
         overlay_static = create_overlay(dem_static, feature_map_static_np, alpha=0.4)
 
@@ -348,94 +284,14 @@ def log_validation_controlnet(
             tracker = accelerator.get_tracker("tensorboard")
             if tracker:
                 tracker.writer.add_images(
-                    "validation/static/img", image_static, step, dataformats="NHWC"
+                    "validation/static/img", image_static, step, dataformats="HWC"
                 )
-                # tracker.writer.add_images(
-                #     "validation/static/dem", dem_static, step, dataformats="NHWC"
-                # )
                 tracker.writer.add_images(
                     "validation/static/overlay",
                     overlay_static,
                     step,
-                    dataformats="NHWC",
+                    dataformats="HWC",
                 )
-
-                # feature_map_static_normalized = feature_map_static_np
-                # fmin = feature_map_static_normalized.min()
-                # fmax = feature_map_static_normalized.max()
-                # if fmax > fmin:
-                #     feature_map_static_normalized = (
-                #         feature_map_static_normalized - fmin
-                #     ) / (fmax - fmin)
-                # feature_map_static_normalized = np.expand_dims(
-                #     feature_map_static_normalized, axis=0
-                # )
-                # tracker.writer.add_images(
-                #     "validation/static/feature_map",
-                #     feature_map_static_normalized,
-                #     step,
-                #     dataformats="NHWC",
-                # )
-
-        if (
-            terrain_pipeline is not None
-            and gen_prompts is not None
-            and num_random_validations > 0
-        ):
-            logger.info(f"Running {num_random_validations} random validations...")
-            for i in range(num_random_validations):
-                random_prompt = random.choice(gen_prompts)
-
-                random_batch = generate_synthetic_batch(
-                    pipeline=terrain_pipeline,
-                    tokenizer=tokenizer,
-                    prompts=[random_prompt],
-                    batch_size=1,
-                    height=height,
-                    width=width,
-                    weight_dtype=weight_dtype,
-                    device=accelerator.device,
-                    generator=generator,
-                )
-
-                feature_map_random = random_batch["feature_map"].to(
-                    accelerator.device, dtype=weight_dtype
-                )
-
-                image_random, dem_random, feature_map_random_viz = run_inference(
-                    random_prompt, feature_map_random, val_scheduler, vae_scale_factor
-                )
-
-                feature_map_random_np = feature_map_random_viz[0].cpu().float().numpy()
-                feature_map_random_np = feature_map_random_np.transpose(1, 2, 0)
-                overlay_random = create_overlay(
-                    dem_random, feature_map_random_np, alpha=0.4
-                )
-
-                if accelerator.is_main_process:
-                    tracker = accelerator.get_tracker("tensorboard")
-                    if tracker:
-                        tracker.writer.add_text(
-                            f"validation/random_{i}/prompt", random_prompt, step
-                        )
-                        tracker.writer.add_images(
-                            f"validation/random_{i}/img",
-                            image_random,
-                            step,
-                            dataformats="NHWC",
-                        )
-                        # tracker.writer.add_images(
-                        #     f"validation/random_{i}/dem",
-                        #     dem_random,
-                        #     step,
-                        #     dataformats="NHWC",
-                        # )
-                        tracker.writer.add_images(
-                            f"validation/random_{i}/overlay",
-                            overlay_random,
-                            step,
-                            dataformats="NHWC",
-                        )
 
     controlnet.train()
 

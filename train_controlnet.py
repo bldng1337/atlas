@@ -66,6 +66,7 @@ channel_drop_prob = 0.25
 enable_feature_dropout = False
 feature_dropout_prob = 0.1
 
+run_name="controlnet-training"
 
 def main():
     os.makedirs(project_dir, exist_ok=True)
@@ -219,7 +220,7 @@ def main():
     logger.info(f"  Mixed precision = {mixed_precision}")
 
     if accelerator.is_main_process:
-        accelerator.init_trackers("controlnet-training")
+        accelerator.init_trackers(run_name)
 
     global_step = 0
     first_epoch = 0
