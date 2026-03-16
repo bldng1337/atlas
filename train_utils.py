@@ -20,7 +20,7 @@ from scipy import ndimage
 from torch import Tensor
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-
+from skimage.morphology import dilation, disk
 from dataset.feature_map import get_map_combined
 from models import ControlNetDEMModel, UNetDEMConditionModel
 from pipeline_terrain import TerrainDiffusionPipeline
@@ -567,6 +567,7 @@ def use_canny_feature(batch: dict) -> dict:
         low=np.percentile(gray, 30)
         high=np.percentile(gray, 70)
         edges = cv2.Canny(gray, low, high)
+        edges=dilation(edges, disk(2))
         results.append(torch.from_numpy(np.stack([edges, edges, edges])).float() / 255.0)
     batch["feature_map"] = torch.stack(results).to(feature_map.device)
     assert batch["feature_map"].shape == shape, f"Expected shape {shape}, got {batch['feature_map'].shape}"
