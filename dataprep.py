@@ -90,12 +90,16 @@ def preprocess(
     tokenizer,
     width,
     height,
+    tokenizer_path=None,
     proportion_empty_prompts=0,
     lower_bound=None,
     upper_bound=None,
     generate_features=False,
     **kwargs,
 ):
+    if tokenizer is None and tokenizer_path is not None:
+        from transformers import CLIPTokenizer
+        tokenizer = CLIPTokenizer.from_pretrained(tokenizer_path, subfolder="tokenizer")
     batch_size = len(batch)
 
     imgs = torch.zeros((batch_size, 3, height, width), dtype=torch.float32)
@@ -119,7 +123,6 @@ def preprocess(
         # Process feature map
         if generate_features:
             fmaps[idx] = torch.zeros((3, height, width), dtype=torch.float32)
-            print(kwargs)
             feature_map, _ = get_map_combined(dem_arr * 1000, dem_size=width, **kwargs)
             feature_map = cv2.resize(
                 feature_map, (width, height), interpolation=cv2.INTER_LINEAR

@@ -54,8 +54,10 @@ conditioning_scale = 1.0
 conditioning_channels = 3
 lower_bound = None
 upper_bound = None
+feature="ridges"
 
 regenerate_feature_map=False
+augment=False
 enable_random_crop = False
 crop_scale = 0.8
 enable_random_flip = False
@@ -176,11 +178,12 @@ def main():
 
     collate_fn = functools.partial(
         preprocess,
-        tokenizer=tokenizer,
+        tokenizer=None,
         height=height,
         width=width,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        tokenizer_path=mesa_path,
         generate_features=regenerate_feature_map,
     )
     train_dataloader = DataLoader(
@@ -190,6 +193,7 @@ def main():
         num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=True,
+        persistent_workers=True,
     )
 
     lr_scheduler = get_scheduler(
@@ -218,15 +222,46 @@ def main():
     logger.info(f"  Gradient Accumulation steps = {gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {max_train_steps}")
     logger.info(f"  Mixed precision = {mixed_precision}")
-
+    global resume_from_checkpoint
     if accelerator.is_main_process:
         accelerator.init_trackers(run_name)
+        tracker = accelerator.get_tracker("tensorboard")
+        if tracker:
+            config_dict = {
+                "mesa_path": mesa_path,
+                "gradient_checkpointing": gradient_checkpointing,
+                "tf32": tf32,
+                "learning_rate": learning_rate,
+                "gradient_accumulation_steps": gradient_accumulation_steps,
+                "train_batch_size": train_batch_size,
+                "use_8bitadam": use_8bitadam,
+                "lr_warmup_steps": lr_warmup_steps,
+                "max_train_steps": max_train_steps,
+                "lr_num_cycles": lr_num_cycles,
+                "lr_power": lr_power,
+                "scheduler_type": scheduler_type,
+                "max_grad_norm": max_grad_norm,
+                "set_grads_to_none": set_grads_to_none,
+                "project_dir": project_dir,
+                "logging_dir": logging_dir,
+                "output_dir": output_dir,
+                "checkpointing_steps": checkpointing_steps,
+                "validation_steps": validation_steps,
+                "proportion_empty_prompts": proportion_empty_prompts,
+                "mixed_precision": mixed_precision,
+                "seed": seed,
+                "xformer": xformer,
+                "resume_from_checkpoint": resume_from_checkpoint,
+                "conditioning_scale": conditioning_scale,
+            }
+            config_str = "\n".join([f"{k}: {v}" for k, v in config_dict.items()])
+            tracker.writer.add_text("config", config_str, 0)
 
     global_step = 0
     first_epoch = 0
     initial_global_step = 0
 
-    global resume_from_checkpoint
+
     if resume_from_checkpoint is not None:
         path = None
         if resume_from_checkpoint == "latest":
@@ -263,7 +298,8 @@ def main():
     )
 
     map_batch = next(iter(train_dataloader))
-    map_batch=use_canny_feature(map_batch)
+    if feature=="canny":
+        map_batch=use_canny_feature(map_batch)
     validation_feature = map_batch["feature_map"].to(
         accelerator.device, dtype=weight_dtype
     )
@@ -296,19 +332,21 @@ def main():
 
     for epoch in range(first_epoch, num_train_epochs):
         for step, batch in enumerate(train_dataloader):
-            # batch = augment_batch(
-            #     batch=batch,
-            #     enable_random_crop=enable_random_crop,
-            #     crop_scale=crop_scale,
-            #     enable_random_flip=enable_random_flip,
-            #     flip_horizontal_prob=flip_horizontal_prob,
-            #     flip_vertical_prob=flip_vertical_prob,
-            #     enable_channel_drop=enable_channel_drop,
-            #     channel_drop_prob=channel_drop_prob,
-            #     enable_feature_dropout=enable_feature_dropout,
-            #     feature_dropout_prob=feature_dropout_prob,
-            # )
-            batch=use_canny_feature(batch)
+            if augment:
+                batch = augment_batch(
+                    batch=batch,
+                    enable_random_crop=enable_random_crop,
+                    crop_scale=crop_scale,
+                    enable_random_flip=enable_random_flip,
+                    flip_horizontal_prob=flip_horizontal_prob,
+                    flip_vertical_prob=flip_vertical_prob,
+                    enable_channel_drop=enable_channel_drop,
+                    channel_drop_prob=channel_drop_prob,
+                    enable_feature_dropout=enable_feature_dropout,
+                    feature_dropout_prob=feature_dropout_prob,
+                )
+            if feature=="canny":
+                batch=use_canny_feature(batch)
 
             with accelerator.accumulate(controlnet):
                 batch["img"] = batch["img"].to(accelerator.device, dtype=weight_dtype)
