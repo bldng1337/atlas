@@ -853,7 +853,6 @@ class TerrainDiffusionPipeline(
     @torch.no_grad()
     def __call__(
         self,
-        controlnet_cond: torch.Tensor,
         prompt: Union[str, List[str]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
@@ -1039,14 +1038,6 @@ class TerrainDiffusionPipeline(
                     latent_model_input, t
                 )
 
-                down_block_res_samples, mid_block_res_sample = self.controlnet(
-                    latent_model_input,
-                    t,
-                    encoder_hidden_states=prompt_embeds,
-                    controlnet_cond=controlnet_cond,
-                    conditioning_scale=conditioning_scale,
-                )
-
                 # predict the noise residual
                 noise_pred = self.unet(
                     latent_model_input,
@@ -1056,8 +1047,6 @@ class TerrainDiffusionPipeline(
                     cross_attention_kwargs=self.cross_attention_kwargs,
                     added_cond_kwargs=added_cond_kwargs,
                     down_intrablock_additional_residuals=adapter_features,
-                    down_block_additional_residuals=down_block_res_samples,
-                    mid_block_additional_residual=mid_block_res_sample,
                     return_dict=False,
                 )[0]
 
