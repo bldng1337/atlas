@@ -296,6 +296,15 @@ def log_validation_controlnet(
     controlnet.train()
 
 
+def cloud_percent_in_batch(batch: dict) -> float:
+    if "cloud_mask" not in batch:
+        return 0.0
+    cloud_mask = cast(Tensor, batch["cloud_mask"])
+    total_pixels = cloud_mask.numel()
+    cloud_pixels = cloud_mask.sum().item()
+    percent_cloud = cloud_pixels / total_pixels if total_pixels > 0 else 0.0
+    return 1-percent_cloud
+
 def train_controlnet(
     latents: Tensor,
     unet: UNetDEMConditionModel,
@@ -303,11 +312,11 @@ def train_controlnet(
     text_encoder: CLIPTextModel,
     noise_scheduler: DDIMScheduler,
     batch: dict,
-    weight_dtype,
     device: torch.device,
     empty_prompt_embeds: Optional[Tensor] = None,
     proportion_empty_prompts=0.1,
     conditioning_scale=1.0,
+    weight_dtype=torch.float32,
     fixed_t: Optional[torch.Tensor] = None,
     fixed_noise: Optional[torch.Tensor] = None,
     prompt_embeds: Optional[Tensor] = None,
@@ -332,10 +341,11 @@ def train_controlnet(
         noise = torch.randn_like(latents)
 
     if fixed_noisy_latents is not None:
+        assert fixed_noise is not None, "fixed_noisy_latents provided without fixed_noise"
+        assert fixed_t is not None, "fixed_noisy_latents provided without fixed_timestep"
         noisy_latents = fixed_noisy_latents
     else:
         noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-    noisy_latents = noisy_latents.to(dtype=weight_dtype)
 
     if prompt_embeds is None:
         with torch.no_grad():
@@ -353,15 +363,15 @@ def train_controlnet(
             if random_mask[i]:
                 prompt_embeds[i] = empty_prompt_embeds[0]
 
-    prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
+    prompt_embeds = prompt_embeds
 
-    controlnet_cond = batch["feature_map"].to(device, dtype=weight_dtype)
+    controlnet_cond = batch["feature_map"].to(device=device, dtype=torch.float32)
 
     down_block_res_samples, mid_block_res_sample = controlnet(
         noisy_latents.to(dtype=torch.float32),
-        timesteps,
+        timesteps.to(dtype=torch.float32),
         encoder_hidden_states=prompt_embeds.to(dtype=torch.float32),
-        controlnet_cond=controlnet_cond.to(dtype=torch.float32),
+        controlnet_cond=controlnet_cond,
         conditioning_scale=conditioning_scale,
     )
 

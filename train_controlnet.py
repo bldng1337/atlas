@@ -19,7 +19,9 @@ from train_utils import (
     augment_batch,
     log_validation_controlnet,
     parse_args,
-    train_controlnet, use_canny_feature,
+    train_controlnet,
+    use_canny_feature,
+    cloud_percent_in_batch,
 )
 
 dataset_path = "bldng/atlas2"
@@ -54,10 +56,10 @@ conditioning_scale = 1.0
 conditioning_channels = 3
 lower_bound = None
 upper_bound = None
-feature="ridges"
+feature = "ridges"
 
-regenerate_feature_map=False
-augment=False
+regenerate_feature_map = False
+augment = False
 enable_random_crop = False
 crop_scale = 0.8
 enable_random_flip = False
@@ -68,7 +70,14 @@ channel_drop_prob = 0.25
 enable_feature_dropout = False
 feature_dropout_prob = 0.1
 
-run_name="controlnet-training"
+run_name = "controlnet-training"
+
+
+# prob not the best
+effective_step = 0
+global_step = 0
+epoch = 0
+
 
 def main():
     os.makedirs(project_dir, exist_ok=True)
@@ -102,6 +111,14 @@ def main():
     )
 
     def save_model_hook(models, weights, output_dir):
+        torch.save(
+            {
+                "effective_step": effective_step,
+                "global_step": global_step,
+                "epoch": epoch,
+            },
+            os.path.join(output_dir, "controlnet_config.pth"),
+        )
         i = len(weights) - 1
         while len(weights) > 0:
             weights.pop()
@@ -112,11 +129,26 @@ def main():
             i -= 1
 
     def load_model_hook(models, input_dir):
+        def load_checkpoint(path):
+            try:
+                return torch.load(path, map_location="cpu", weights_only=True)
+            except TypeError:
+                return torch.load(path, map_location="cpu")
+
+        config_path = os.path.join(input_dir, "controlnet_config.pth")
+        if os.path.exists(config_path):
+            config = load_checkpoint(config_path)
+            global effective_step, global_step, epoch
+            effective_step = config["effective_step"]
+            global_step = config["global_step"]
+            epoch = config["epoch"]
+
         while len(models) > 0:
             model = models.pop()
             load_path = os.path.join(input_dir, f"model_{len(models):02d}.pth")
             if os.path.exists(load_path):
-                model.load_state_dict(torch.load(load_path))
+                state_dict = load_checkpoint(load_path)
+                model.load_state_dict(state_dict)
 
     accelerator.register_save_state_pre_hook(save_model_hook)
     accelerator.register_load_state_pre_hook(load_model_hook)
@@ -192,8 +224,8 @@ def main():
         drop_last=True,
         num_workers=num_workers,
         collate_fn=collate_fn,
-        pin_memory=True,
-        persistent_workers=True,
+        pin_memory=num_workers > 0,
+        persistent_workers=num_workers > 0,
     )
 
     lr_scheduler = get_scheduler(
@@ -222,6 +254,7 @@ def main():
     logger.info(f"  Gradient Accumulation steps = {gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {max_train_steps}")
     logger.info(f"  Mixed precision = {mixed_precision}")
+    logger.info(f" Device = {accelerator.device}")
     global resume_from_checkpoint
     if accelerator.is_main_process:
         accelerator.init_trackers(run_name)
@@ -260,7 +293,7 @@ def main():
     global_step = 0
     first_epoch = 0
     initial_global_step = 0
-
+    effective_step = 0
 
     if resume_from_checkpoint is not None:
         path = None
@@ -290,19 +323,10 @@ def main():
             except Exception:
                 first_epoch = 0
 
-    progress_bar = tqdm(
-        range(0, max_train_steps),
-        initial=initial_global_step,
-        desc="Steps",
-        disable=not accelerator.is_local_main_process,
-    )
-
     map_batch = next(iter(train_dataloader))
-    if feature=="canny":
-        map_batch=use_canny_feature(map_batch)
-    validation_feature = map_batch["feature_map"].to(
-        accelerator.device, dtype=weight_dtype
-    )
+    if feature == "canny":
+        map_batch = use_canny_feature(map_batch)
+    validation_feature = map_batch["feature_map"].to(accelerator.device)
     del map_batch
 
     if accelerator.is_main_process:
@@ -330,6 +354,12 @@ def main():
     with torch.no_grad():
         empty_prompt_embeds = text_encoder(empty_token_ids)[0].to(dtype=weight_dtype)
 
+    progress_bar = tqdm(
+        range(0, max_train_steps),
+        initial=initial_global_step,
+        desc="Steps",
+        disable=not accelerator.is_local_main_process,
+    )
     for epoch in range(first_epoch, num_train_epochs):
         for step, batch in enumerate(train_dataloader):
             if augment:
@@ -345,8 +375,8 @@ def main():
                     enable_feature_dropout=enable_feature_dropout,
                     feature_dropout_prob=feature_dropout_prob,
                 )
-            if feature=="canny":
-                batch=use_canny_feature(batch)
+            if feature == "canny":
+                batch = use_canny_feature(batch)
 
             with accelerator.accumulate(controlnet):
                 batch["img"] = batch["img"].to(accelerator.device, dtype=weight_dtype)
@@ -374,6 +404,10 @@ def main():
                     conditioning_scale=conditioning_scale,
                 )
 
+                effective_step += (
+                    cloud_percent_in_batch(batch) / gradient_accumulation_steps
+                )
+
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     params_to_clip = controlnet.parameters()
@@ -397,6 +431,7 @@ def main():
                 logs = {
                     "loss": loss.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0],
+                    "effective_step": effective_step,
                 }
                 progress_bar.set_postfix(**logs)
                 accelerator.log(logs, step=global_step)
@@ -419,7 +454,9 @@ def main():
                         )
 
                     if global_step >= max_train_steps:
-                        save_path = os.path.join(output_dir, f"checkpoint-{global_step}")
+                        save_path = os.path.join(
+                            output_dir, f"checkpoint-{global_step}"
+                        )
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
                         break
