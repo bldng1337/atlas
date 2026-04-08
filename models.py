@@ -1459,6 +1459,8 @@ class UNetDEMConditionModel(
         if is_controlnet:
             new_down_block_res_samples = ()
 
+            assert len(down_block_res_samples) == len(down_block_additional_residuals), "The number of down block residual samples should be the same as the number of down block additional residuals for controlnet."
+
             for down_block_res_sample, down_block_additional_residual in zip(
                 down_block_res_samples, down_block_additional_residuals
             ):
@@ -1613,7 +1615,7 @@ def zero_module(module):
     Zero out the parameters of a module and return it.
     """
     for p in module.parameters():
-        p.detach().zero_()
+        torch.nn.init.zeros_(p)
     return module
 
 
@@ -1989,7 +1991,7 @@ class ControlNetDEMModel(ModelMixin, ConfigMixin):
         unet: UNetDEMConditionModel,
         conditioning_channels: int = 3,
         load_weights_from_unet: bool = True,
-    ):
+    )->"ControlNetDEMModel":
         controlnet = cls(
             in_channels=unet.config["in_channels"],
             hint_channels=conditioning_channels,
