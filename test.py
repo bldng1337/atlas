@@ -14,7 +14,7 @@ from dataprep import preprocess
 from torch.utils.data import DataLoader
 
 mesa_path = "./weights"
-mode = "both"
+mode = "none"
 device = "cuda"
 mixed_precision = "bf16"
 dataset_path = None
@@ -256,8 +256,8 @@ for name, param in controlnet.named_parameters():
         else:
             grad_norms.append(param.grad.norm().item())
 
-total_params = sum(1 for p in controlnet.parameters() if p.requires_grad)
-info(f"Total trainable parameters: {total_params}")
+total_params = sum(p.numel() for p in controlnet.parameters() if p.requires_grad)
+info(f"Total trainable parameters: {total_params / 1e6:.1f}M")
 info(f"Parameters with gradients: {len(grad_norms)}")
 if none_grads:
     warn(f"Parameters with None gradient: {len(none_grads)}")
@@ -297,7 +297,7 @@ with torch.no_grad():
     cn_mean = sum(s.mean().item() for s in down_block_res_samples) / len(
         down_block_res_samples
     )
-    cn_max = max(s.abs().max().item() for s in down_block_res_samples)
+    cn_max = max(max(s.abs().max().item() for s in down_block_res_samples),mid_block_res_sample.abs().max().item())
     info(f"ControlNet down_block residuals: mean={cn_mean:.6f}, max={cn_max:.6f}")
     info(
         f"ControlNet mid_block residual: mean={mid_block_res_sample.mean().item():.6f}, max={mid_block_res_sample.abs().max().item():.6f}"
@@ -333,9 +333,9 @@ with torch.no_grad():
     max_diff = output_diff.max().item()
     std_diff = output_diff.std().item()
 
-    info(f"Mean output difference: {mean_diff:.6f}")
-    info(f"Max output difference: {max_diff:.6f}")
-    info(f"Std output difference: {std_diff:.6f}")
+    info(f"Mean output difference with random residuals vs no residuals: {mean_diff:.6f}")
+    info(f"Max output difference with random residuals vs no residuals: {max_diff:.6f}")
+    info(f"Std output difference with random residuals vs no residuals: {std_diff:.6f}")
 
     check(
         mean_diff > 1e-6,
@@ -599,23 +599,3 @@ with torch.no_grad():
     img_to_show = decoded_img[0].detach().cpu()
     img_to_show = (img_to_show + 1) / 2
     img_to_show = img_to_show.clamp(0, 1).to(torch.float32)
-
-    plt.figure(figsize=(16, 8))
-
-    plt.subplot(1, 2, 1)
-    np_img = img_to_show[:3].permute(1, 2, 0).numpy()
-    plt.imshow(np_img)
-    plt.title("Generated Image (RGB)")
-    plt.axis("off")
-
-    plt.subplot(1, 2, 2)
-    dem_to_show = decoded_dem[0, 0].detach().to(torch.float32).cpu()
-    dem_min, dem_max = dem_to_show.min(), dem_to_show.max()
-    dem_normalized = (dem_to_show - dem_min) / (dem_max - dem_min + 1e-8)
-    plt.imshow(dem_normalized, cmap="terrain")
-    plt.title(f"Generated DEM (elevation)\nRange: [{dem_min:.3f}, {dem_max:.3f}]")
-    plt.axis("off")
-    plt.colorbar()
-
-    plt.tight_layout()
-    plt.show()
