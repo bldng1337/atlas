@@ -411,10 +411,11 @@ def train_controlnet(
         mse = (model_pred.float() - target.float()) ** 2
         weighted_mse = mse * loss_weight
 
-        loss = weighted_mse.sum() / (loss_weight.sum() + 1e-8)
+        loss = weighted_mse.float().sum() / (loss_weight.float().sum() + 1e-8)
         return loss
 
     mse = (model_pred.float() - target.float()) ** 2
+
     loss = mse.mean()
     return loss
 
