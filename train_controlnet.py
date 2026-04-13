@@ -1,6 +1,6 @@
 import functools
 import os
-
+import logging
 import torch
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -50,7 +50,8 @@ proportion_empty_prompts = 0.2
 streaming = False
 mixed_precision = "bf16"
 seed = 42
-xformer = True
+attention_backend = "sdpa"
+use_torch_compile = True
 resume_from_checkpoint = None
 conditioning_scale = 1.0
 conditioning_channels = 3
@@ -80,6 +81,7 @@ epoch = 0
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     os.makedirs(project_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(logging_dir, exist_ok=True)
@@ -157,9 +159,14 @@ def main():
     text_encoder.requires_grad_(False)
     unet.requires_grad_(False)
 
-    if xformer:
+    if attention_backend == "xformers":
         unet.enable_xformers_memory_efficient_attention()
         controlnet.enable_xformers_memory_efficient_attention()
+    elif attention_backend in "sdpa":
+        from diffusers.models.attention_processor import AttnProcessor2_0
+
+        unet.set_attn_processor(AttnProcessor2_0())
+        controlnet.set_attn_processor(AttnProcessor2_0())
 
     if tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -172,6 +179,12 @@ def main():
 
     if gradient_checkpointing:
         controlnet.enable_gradient_checkpointing()
+
+    if use_torch_compile:
+        controlnet = torch.compile(controlnet)
+        unet = torch.compile(unet)
+        vae = torch.compile(vae)
+        logger.info("torch.compile enabled")
 
     if use_8bitadam:
         from bitsandbytes.optim.adamw import AdamW8bit
@@ -251,7 +264,14 @@ def main():
     logger.info(
         f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
     )
-    logger.info(f"  Gradient Accumulation steps = {gradient_accumulation_steps}")
+    if "sdpa" in attention_backend:
+        if torch.backends.cuda.is_flash_attention_available() and mixed_precision in ["fp16", "bf16"]:
+            logger.info("  Using Flash Attention (SDPA)")
+        elif torch.backends.cuda.mem_efficient_sdp_enabled():
+            logger.info("  Using Memory Efficient Attention (SDPA)")
+        else:
+            logger.info("  Using Standard Attention (SDPA)")
+    logger.info(f"  Gradient Accumulation steps = {accelerator.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {max_train_steps}")
     logger.info(f"  Mixed precision = {mixed_precision}")
     logger.info(f" Device = {accelerator.device}")
@@ -283,7 +303,8 @@ def main():
                 "proportion_empty_prompts": proportion_empty_prompts,
                 "mixed_precision": mixed_precision,
                 "seed": seed,
-                "xformer": xformer,
+                "attention_backend": attention_backend,
+                "use_torch_compile": use_torch_compile,
                 "resume_from_checkpoint": resume_from_checkpoint,
                 "conditioning_scale": conditioning_scale,
             }
@@ -413,53 +434,55 @@ def main():
                     params_to_clip = controlnet.parameters()
                     accelerator.clip_grad_norm_(params_to_clip, max_grad_norm)
                 optimizer.step()
-                lr_scheduler.step()
                 optimizer.zero_grad(set_to_none=set_grads_to_none)
+                if accelerator.sync_gradients:
+                    lr_scheduler.step()
+                    progress_bar.update(1)
+                    global_step += 1
+                    if accelerator.is_main_process:
+                        if global_step % checkpointing_steps == 0:
+                            save_path = os.path.join(
+                                output_dir, f"checkpoint-{global_step}"
+                            )
+                            accelerator.save_state(save_path)
+                            logger.info(f"Saved state to {save_path}")
 
-            if accelerator.sync_gradients:
-                progress_bar.update(1)
-                global_step += 1
+                    logs = {
+                        "loss": loss.detach().item(),
+                        "lr": lr_scheduler.get_last_lr()[0],
+                        "effective_step": effective_step,
+                    }
+                    progress_bar.set_postfix(**logs)
+                    if global_step%100 == 0:
+                        del loss, batch, latents
+                        torch.cuda.empty_cache()
+                        logs["memory"] = torch.cuda.memory_summary()
+                    accelerator.log(logs, step=global_step)
 
-                if accelerator.is_main_process:
-                    if global_step % checkpointing_steps == 0:
-                        save_path = os.path.join(
-                            output_dir, f"checkpoint-{global_step}"
-                        )
-                        accelerator.save_state(save_path)
-                        logger.info(f"Saved state to {save_path}")
+                    if accelerator.is_main_process:
+                        if global_step % validation_steps == 0:
+                            log_validation_controlnet(
+                                unet,
+                                controlnet,
+                                vae,
+                                text_encoder,
+                                tokenizer,
+                                noise_scheduler,
+                                accelerator,
+                                validation_feature,
+                                weight_dtype,
+                                height,
+                                width,
+                                global_step,
+                            )
 
-                logs = {
-                    "loss": loss.detach().item(),
-                    "lr": lr_scheduler.get_last_lr()[0],
-                    "effective_step": effective_step,
-                }
-                progress_bar.set_postfix(**logs)
-                accelerator.log(logs, step=global_step)
-
-                if accelerator.is_main_process:
-                    if global_step % validation_steps == 0:
-                        log_validation_controlnet(
-                            unet,
-                            controlnet,
-                            vae,
-                            text_encoder,
-                            tokenizer,
-                            noise_scheduler,
-                            accelerator,
-                            validation_feature,
-                            weight_dtype,
-                            height,
-                            width,
-                            global_step,
-                        )
-
-                    if global_step >= max_train_steps:
-                        save_path = os.path.join(
-                            output_dir, f"checkpoint-{global_step}"
-                        )
-                        accelerator.save_state(save_path)
-                        logger.info(f"Saved state to {save_path}")
-                        break
+                        if global_step >= max_train_steps:
+                            save_path = os.path.join(
+                                output_dir, f"checkpoint-{global_step}"
+                            )
+                            accelerator.save_state(save_path)
+                            logger.info(f"Saved state to {save_path}")
+                            break
 
         if global_step >= max_train_steps:
             break

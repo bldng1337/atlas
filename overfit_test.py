@@ -15,6 +15,8 @@ from torch.utils.data import DataLoader
 from transformers import CLIPTextModel, CLIPTokenizer
 from torch.amp import autocast, GradScaler
 
+from typing import cast
+
 from dataprep import preprocess
 from models import ControlNetDEMModel, UNetDEMConditionModel
 from pipeline_terrain import (
@@ -49,9 +51,10 @@ dataset_path = None
 lower_bound = None
 upper_bound = None
 num_inference_steps_gen = 25
-xformer = True
+xformer = False
 hardcode_step = False
 use_8bitadam = True
+use_torch_compile = True
 
 parse_args(globals())
 
@@ -92,9 +95,15 @@ unet.to(device, dtype=weight_dtype).eval().requires_grad_(False)
 text_encoder.to(device, dtype=weight_dtype).eval().requires_grad_(False)
 controlnet.to(device, dtype=torch.float32).train()
 controlnet.enable_gradient_checkpointing()
+
 if xformer:
     unet.enable_xformers_memory_efficient_attention()
     controlnet.enable_xformers_memory_efficient_attention()
+
+if use_torch_compile:
+    controlnet = cast(ControlNetDEMModel, torch.compile(controlnet))
+    unet = cast(UNetDEMConditionModel,torch.compile(unet))
+    vae =  cast(AutoencoderKL,torch.compile(vae))
 n_params = sum(p.numel() for p in controlnet.parameters() if p.requires_grad)
 print(f"  ControlNet trainable params: {n_params / 1e6:.1f}M")
 
