@@ -246,7 +246,7 @@ def main():
         collate_fn=collate_fn,
         pin_memory=num_workers > 0,
         persistent_workers=num_workers > 0,
-        multiprocessing_context="spawn",
+        multiprocessing_context="spawn" if num_workers > 0 else None,
         worker_init_fn=make_worker_init_fn(mesa_path, fast_tokenizer=True),
     )
 
