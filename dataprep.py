@@ -11,14 +11,16 @@ from dataset.feature_map import get_map_combined
 
 _worker_tokenizer = None
 
-def make_worker_init_fn(tokenizer_path, fast_tokenizer=False):
-    def worker_init_fn(worker_id):
+class WorkerInitializer:
+    def __init__(self, tokenizer_path: str):
+        self.tokenizer_path = tokenizer_path
+
+    def __call__(self, worker_id: int):
         global _worker_tokenizer
         from transformers import CLIPTokenizer
         _worker_tokenizer = CLIPTokenizer.from_pretrained(
-            tokenizer_path, subfolder="tokenizer", use_fast=fast_tokenizer
+            self.tokenizer_path, subfolder="tokenizer", use_fast=False
         )
-    return worker_init_fn
 
 def norm(data, center=True):
     lo, hi = data.min(), data.max()
@@ -107,6 +109,8 @@ def preprocess(
     generate_features=False,
     **kwargs,
 ):
+    if _worker_tokenizer is not None:
+        tokenizer = _worker_tokenizer
     if tokenizer is None and tokenizer_path is not None:
         from transformers import CLIPTokenizer
         tokenizer = CLIPTokenizer.from_pretrained(tokenizer_path, subfolder="tokenizer")
