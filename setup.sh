@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+echo "Remounting /dev/shm with more memory..."
+mount -o remount,size=6G /dev/shm
+
 echo "Installing system dependencies..."
 
 apt-get update && apt-get install -y \
