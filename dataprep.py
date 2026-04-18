@@ -9,6 +9,16 @@ from rasterio.io import MemoryFile
 
 from dataset.feature_map import get_map_combined
 
+_worker_tokenizer = None
+
+def make_worker_init_fn(tokenizer_path, fast_tokenizer=False):
+    def worker_init_fn(worker_id):
+        global _worker_tokenizer
+        from transformers import CLIPTokenizer
+        _worker_tokenizer = CLIPTokenizer.from_pretrained(
+            tokenizer_path, subfolder="tokenizer", use_fast=fast_tokenizer
+        )
+    return worker_init_fn
 
 def norm(data, center=True):
     lo, hi = data.min(), data.max()

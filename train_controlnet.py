@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
-from dataprep import preprocess
+from dataprep import preprocess, make_worker_init_fn
 from models import ControlNetDEMModel, UNetDEMConditionModel
 from train_utils import (
     augment_batch,
@@ -23,6 +23,12 @@ from train_utils import (
     use_canny_feature,
     cloud_percent_in_batch,
 )
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+
+import torch.multiprocessing as mp
+mp.set_sharing_strategy('file_system')
 
 dataset_path = "bldng/atlas2"
 mesa_path = "NewtNewt/MESA"
@@ -240,6 +246,8 @@ def main():
         collate_fn=collate_fn,
         pin_memory=num_workers > 0,
         persistent_workers=num_workers > 0,
+        multiprocessing_context="spawn",
+        worker_init_fn=make_worker_init_fn(mesa_path, fast_tokenizer=True),
     )
 
     lr_scheduler = get_scheduler(
