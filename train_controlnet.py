@@ -46,6 +46,7 @@ logging_dir = "./logs"
 output_dir = "./outputs/checkpoints"
 checkpointing_steps = 1000
 validation_steps = 1000
+log_grad_steps = 500
 proportion_empty_prompts = 0.2
 streaming = False
 mixed_precision = "bf16"
@@ -140,7 +141,7 @@ def main():
         config_path = os.path.join(input_dir, "controlnet_config.pth")
         if os.path.exists(config_path):
             config = load_checkpoint(config_path)
-            global effective_step, global_step, epoch
+            nonlocal effective_step, global_step, epoch
             effective_step = config["effective_step"]
             global_step = config["global_step"]
             epoch = config["epoch"]
@@ -265,13 +266,18 @@ def main():
         f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
     )
     if "sdpa" in attention_backend:
-        if torch.backends.cuda.is_flash_attention_available() and mixed_precision in ["fp16", "bf16"]:
+        if torch.backends.cuda.is_flash_attention_available() and mixed_precision in [
+            "fp16",
+            "bf16",
+        ]:
             logger.info("  Using Flash Attention (SDPA)")
         elif torch.backends.cuda.mem_efficient_sdp_enabled():
             logger.info("  Using Memory Efficient Attention (SDPA)")
         else:
             logger.info("  Using Standard Attention (SDPA)")
-    logger.info(f"  Gradient Accumulation steps = {accelerator.gradient_accumulation_steps}")
+    logger.info(
+        f"  Gradient Accumulation steps = {accelerator.gradient_accumulation_steps}"
+    )
     logger.info(f"  Total optimization steps = {max_train_steps}")
     logger.info(f"  Mixed precision = {mixed_precision}")
     logger.info(f" Device = {accelerator.device}")
@@ -337,12 +343,6 @@ def main():
             accelerator.load_state(os.path.join(output_dir, path))
             global_step = int(path.split("-")[1])
             initial_global_step = global_step
-            try:
-                first_epoch = (
-                    global_step // len(train_dataloader) // gradient_accumulation_steps
-                )
-            except Exception:
-                first_epoch = 0
 
     map_batch = next(iter(train_dataloader))
     if feature == "canny":
@@ -374,6 +374,10 @@ def main():
     ).input_ids.to(accelerator.device)
     with torch.no_grad():
         empty_prompt_embeds = text_encoder(empty_token_ids)[0].to(dtype=weight_dtype)
+
+    cn_norm_accum = {}
+    t_bucket_losses = {}
+    _diag_accum_n = 0
 
     progress_bar = tqdm(
         range(0, max_train_steps),
@@ -411,7 +415,7 @@ def main():
 
                     latents = torch.cat([img_latents, dem_latents], dim=1).float()
 
-                loss = train_controlnet(
+                loss, diag = train_controlnet(
                     latents=latents,
                     controlnet=controlnet,
                     unet=unet,
@@ -423,16 +427,57 @@ def main():
                     device=accelerator.device,
                     weight_dtype=weight_dtype,
                     conditioning_scale=conditioning_scale,
+                    return_diagnostics=True,
                 )
+
+                _diag_accum_n += 1
+                for i, norm in enumerate(diag["cn_down_norms"]):
+                    key = f"cn_down_norm_{i}"
+                    cn_norm_accum[key] = cn_norm_accum.get(key, 0.0) + norm
+                cn_norm_accum["cn_mid_norm"] = (
+                    cn_norm_accum.get("cn_mid_norm", 0.0) + diag["cn_mid_norm"]
+                )
+                _loss_val = loss.item()
+                _n_t = len(diag["timesteps"])
+                for t in diag["timesteps"]:
+                    bucket = t // 250
+                    if bucket not in t_bucket_losses:
+                        t_bucket_losses[bucket] = [0.0, 0]
+                    t_bucket_losses[bucket][0] += _loss_val / _n_t
+                    t_bucket_losses[bucket][1] += 1
 
                 effective_step += (
                     cloud_percent_in_batch(batch) / gradient_accumulation_steps
                 )
 
                 accelerator.backward(loss)
+                grad_stats = {}
                 if accelerator.sync_gradients:
                     params_to_clip = controlnet.parameters()
                     accelerator.clip_grad_norm_(params_to_clip, max_grad_norm)
+                    if (global_step + 1) % log_grad_steps == 0:
+                        unwrapped = accelerator.unwrap_model(controlnet)
+                        grad_norms = []
+                        for param in unwrapped.parameters():
+                            if param.requires_grad:
+                                if (
+                                    param.grad is not None
+                                    and not torch.isnan(param.grad).any()
+                                ):
+                                    grad_norms.append(param.grad.norm().item())
+                        if grad_norms:
+                            grad_stats["mean_grad"] = sum(grad_norms) / len(grad_norms)
+                            grad_stats["max_grad"] = max(grad_norms)
+                        else:
+                            grad_stats["mean_grad"] = float("nan")
+                            grad_stats["max_grad"] = float("nan")
+                        param_max = float("-inf")
+                        for block in unwrapped.controlnet_down_blocks:
+                            for p in block.parameters():
+                                param_max = max(param_max, p.data.abs().max().item())
+                        for p in unwrapped.controlnet_mid_block.parameters():
+                            param_max = max(param_max, p.data.abs().max().item())
+                        grad_stats["max_param_weight"] = param_max
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=set_grads_to_none)
                 if accelerator.sync_gradients:
@@ -451,9 +496,19 @@ def main():
                         "loss": loss.detach().item(),
                         "lr": lr_scheduler.get_last_lr()[0],
                         "effective_step": effective_step,
+                        "epoch": epoch,
                     }
                     progress_bar.set_postfix(**logs)
-                    if global_step%100 == 0:
+                    logs.update(grad_stats)
+                    if grad_stats:
+                        for key in cn_norm_accum:
+                            logs[key] = cn_norm_accum[key] / _diag_accum_n
+                        cn_norm_accum.clear()
+                        for bucket, (s, c) in sorted(t_bucket_losses.items()):
+                            logs[f"loss_t{bucket}"] = s / c if c > 0 else float("nan")
+                        t_bucket_losses.clear()
+                        _diag_accum_n = 0
+                    if global_step % 100 == 0:
                         del loss, batch, latents
                         torch.cuda.empty_cache()
                         logs["memory"] = torch.cuda.memory_summary()
@@ -483,14 +538,8 @@ def main():
                             accelerator.save_state(save_path)
                             logger.info(f"Saved state to {save_path}")
                             break
-
         if global_step >= max_train_steps:
             break
-
-        save_path = os.path.join(output_dir, f"checkpoint-{global_step}")
-        accelerator.save_state(save_path)
-        logger.info(f"Saved state to {save_path}")
-
 
 if __name__ == "__main__":
     parse_args(globals())

@@ -322,6 +322,7 @@ def train_controlnet(
     prompt_embeds: Optional[Tensor] = None,
     fixed_noisy_latents: Optional[Tensor] = None,
     fixed_target: Optional[Tensor] = None,
+    return_diagnostics=False,
 ):
     bsz = latents.shape[0]
 
@@ -375,6 +376,14 @@ def train_controlnet(
         conditioning_scale=conditioning_scale,
     )
 
+    diag = None
+    if return_diagnostics:
+        diag = {
+            "cn_down_norms": [s.detach().norm().item() for s in down_block_res_samples],
+            "cn_mid_norm": mid_block_res_sample.detach().norm().item(),
+            "timesteps": timesteps.detach().cpu().tolist(),
+        }
+
     model_pred = unet(
         noisy_latents.to(dtype=weight_dtype),
         timesteps,
@@ -412,11 +421,15 @@ def train_controlnet(
         weighted_mse = mse * loss_weight
 
         loss = weighted_mse.float().sum() / (loss_weight.float().sum() + 1e-8)
+        if return_diagnostics:
+            return loss, diag
         return loss
 
     mse = (model_pred.float() - target.float()) ** 2
 
     loss = mse.mean()
+    if return_diagnostics:
+        return loss, diag
     return loss
 
 def use_canny_feature(batch: dict) -> dict:
@@ -434,7 +447,7 @@ def use_canny_feature(batch: dict) -> dict:
         low=np.percentile(gray, 30)
         high=np.percentile(gray, 70)
         edges = cv2.Canny(gray, low, high)
-        edges=dilation(edges, disk(2))
+        edges=dilation(edges, disk(6))
         results.append(torch.from_numpy(np.stack([edges, edges, edges])).float() / 255.0)
     batch["feature_map"] = torch.stack(results).to(feature_map.device)
     assert batch["feature_map"].shape == shape, f"Expected shape {shape}, got {batch['feature_map'].shape}"
