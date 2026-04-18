@@ -36,10 +36,8 @@ dependencies = [
     "pyflwdir>=0.5.10",
     "torch>=2.7.0",
     "torchvision>=0.22.0",
-    "xformers>=0.0.30 ; sys_platform == 'linux'",
     "triton>=3.2.0 ; sys_platform == 'linux'",
     "triton-windows>=3.2.0 ; sys_platform == 'win32'",
-    "flash-attn>=2.8.3 ; sys_platform == 'linux'",
 ]
 
 [tool.uv.sources]
@@ -48,15 +46,6 @@ torch = [
 ]
 torchvision = [
     { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-xformers = [
-    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
-]
-flash-attn = [
-    {
-        url    = "https://huggingface.co/strangertoolshf/flash_attention_2_wheelhouse/resolve/main/wheelhouse-flash_attn-2.8.3/linux_x86_64/torch2.7/cu12/abiTRUE/cp39/flash_attn-2.8.3+cu12torch2.7cxx11abiTRUE-cp39-cp39-linux_x86_64.whl",
-        marker = "sys_platform == 'linux'"
-    },
 ]
 
 [[tool.uv.index]]
