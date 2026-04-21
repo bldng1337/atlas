@@ -25,11 +25,6 @@ from train_utils import (
 )
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-
-
-import torch.multiprocessing as mp
-mp.set_sharing_strategy('file_system')
-
 dataset_path = "bldng/atlas2"
 mesa_path = "NewtNewt/MESA"
 gradient_checkpointing = True
@@ -37,7 +32,7 @@ tf32 = True
 learning_rate = 1e-5
 gradient_accumulation_steps = 16
 train_batch_size = 1
-use_8bitadam = True
+optimizer_type = "8bitadam"
 lr_warmup_steps = 700
 num_train_epochs = 20
 max_train_steps = 20000
@@ -77,6 +72,7 @@ enable_channel_drop = False
 channel_drop_prob = 0.25
 enable_feature_dropout = False
 feature_dropout_prob = 0.1
+snr_gamma = 5.0
 
 run_name = "controlnet-training"
 
@@ -192,21 +188,39 @@ def main():
         unet = torch.compile(unet)
         vae = torch.compile(vae)
         logger.info("torch.compile enabled")
-
-    if use_8bitadam:
-        from bitsandbytes.optim.adamw import AdamW8bit
-
-        optimizer_class = AdamW8bit
-    else:
-        optimizer_class = torch.optim.AdamW
     params_to_optimize = controlnet.parameters()
-    optimizer = optimizer_class(
-        params_to_optimize,
-        lr=learning_rate,
-        betas=(0.9, 0.999),
-        weight_decay=1e-2,
-        eps=1e-8,
-    )
+
+    if optimizer_type == "8bitadam":
+        from bitsandbytes.optim.adamw import AdamW8bit
+        optimizer = optimizer_class(
+            params_to_optimize,
+            lr=learning_rate,
+            betas=(0.9, 0.999),
+            weight_decay=1e-2,
+            eps=1e-8,
+        )
+    elif optimizer_type == "adamw":
+        optimizer = torch.optim.AdamW(
+            params_to_optimize,
+            lr=learning_rate,
+            betas=(0.9, 0.999),
+            weight_decay=1e-2,
+            eps=1e-8,
+        )
+    elif optimizer_type == "prodigy":
+        from prodigyopt import Prodigy
+        optimizer = Prodigy(
+            params_to_optimize,
+            lr=1.,
+            d_coef=1.0,
+            weight_decay=1e-2,
+            decouple=True,
+            use_bias_correction=True,
+            safeguard_warmup=True,
+        )
+    else:
+        raise ValueError(f"Unsupported optimizer type: {optimizer_type}")
+
 
     vae.to(accelerator.device, dtype=weight_dtype)
     vae.eval()
@@ -222,7 +236,6 @@ def main():
         split="train",
         streaming=streaming,
     )
-    train_dataset = train_dataset.with_format("torch")
 
     vae_scale_factor = 2 ** (len(vae.config["block_out_channels"]) - 1)
     height = unet.config["sample_size"] * vae_scale_factor
@@ -245,8 +258,7 @@ def main():
         num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=num_workers > 0,
-        persistent_workers=num_workers > 0,
-        multiprocessing_context="spawn" if num_workers > 0 else None,
+        multiprocessing_context="fork" if num_workers > 0 else None,
         worker_init_fn=WorkerInitializer(mesa_path),
     )
 
@@ -436,6 +448,7 @@ def main():
                     weight_dtype=weight_dtype,
                     conditioning_scale=conditioning_scale,
                     return_diagnostics=True,
+                    snr_gamma=snr_gamma
                 )
 
                 _diag_accum_n += 1

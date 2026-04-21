@@ -38,6 +38,7 @@ dependencies = [
     "torchvision>=0.22.0",
     "triton>=3.2.0 ; sys_platform == 'linux'",
     "triton-windows>=3.2.0 ; sys_platform == 'win32'",
+    "prodigyopt>=1.1.2",
 ]
 
 [tool.uv.sources]

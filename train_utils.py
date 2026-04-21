@@ -14,7 +14,7 @@ from accelerate.utils import ProjectConfiguration, set_seed
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.optimization import SchedulerType, get_scheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
-from diffusers.training_utils import EMAModel
+from diffusers.training_utils import EMAModel, compute_snr
 from diffusers.utils.torch_utils import randn_tensor
 from scipy import ndimage
 from torch import Tensor
@@ -323,6 +323,7 @@ def train_controlnet(
     fixed_noisy_latents: Optional[Tensor] = None,
     fixed_target: Optional[Tensor] = None,
     return_diagnostics=False,
+    snr_gamma: Optional[float] = None,
 ):
     bsz = latents.shape[0]
 
@@ -405,8 +406,10 @@ def train_controlnet(
             f"Unknown prediction type {noise_scheduler.config['prediction_type']}"
         )
 
+    mse = (model_pred.float() - target.float()) ** 2
+
     if "cloud_mask" in batch:
-        cloud_mask = batch["cloud_mask"].to(device, dtype=weight_dtype)
+        cloud_mask = batch["cloud_mask"].to(device, dtype=torch.float32)
 
         cloud_mask_latent = F.interpolate(
             cloud_mask,
@@ -414,18 +417,13 @@ def train_controlnet(
             mode="bilinear",
             align_corners=False,
         )
-
         loss_weight = (1.0 - cloud_mask_latent).expand_as(model_pred)
+        mse = mse * loss_weight
 
-        mse = (model_pred.float() - target.float()) ** 2
-        weighted_mse = mse * loss_weight
-
-        loss = weighted_mse.float().sum() / (loss_weight.float().sum() + 1e-8)
-        if return_diagnostics:
-            return loss, diag
-        return loss
-
-    mse = (model_pred.float() - target.float()) ** 2
+    if snr_gamma is not None:
+        snr = compute_snr(noise_scheduler=noise_scheduler, timesteps=timesteps).float()
+        snr_weights = torch.clamp(snr, max=snr_gamma) / (snr + 1)
+        mse = mse.mean(dim=[1, 2, 3]) * snr_weights
 
     loss = mse.mean()
     if return_diagnostics:
@@ -447,7 +445,7 @@ def use_canny_feature(batch: dict) -> dict:
         low=np.percentile(gray, 30)
         high=np.percentile(gray, 70)
         edges = cv2.Canny(gray, low, high)
-        edges=dilation(edges, disk(6))
+        edges=dilation(edges, disk(2))
         results.append(torch.from_numpy(np.stack([edges, edges, edges])).float() / 255.0)
     batch["feature_map"] = torch.stack(results).to(feature_map.device)
     assert batch["feature_map"].shape == shape, f"Expected shape {shape}, got {batch['feature_map'].shape}"
