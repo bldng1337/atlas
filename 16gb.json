@@ -1,0 +1,19 @@
+{
+  "streaming": true,
+  "train_batch_size": 1,
+  "gradient_accumulation_steps": 4,
+  "num_train_epochs": 40,
+  "max_train_steps": 40000,
+  "gradient_checkpointing": true,
+  "mixed_precision": "fp16",
+  "optimizer_type": "prodigy",
+  "scheduler_type": "constant",
+  "snr_gamma": 5.0,
+  "use_torch_compile": false,
+  "attention_backend": "sdpa",
+  "tf32": false,
+  "num_workers": 4,
+  "feature": "canny",
+  "seed": 42,
+  "resume_from_checkpoint": "latest"
+}
