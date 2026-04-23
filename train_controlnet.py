@@ -1,3 +1,5 @@
+import time
+from typing import cast
 import functools
 import os
 import logging
@@ -21,7 +23,7 @@ from train_utils import (
     parse_args,
     train_controlnet,
     use_canny_feature,
-    cloud_percent_in_batch,
+    cloud_percent_in_batch, get_commit,
 )
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -74,7 +76,8 @@ enable_feature_dropout = False
 feature_dropout_prob = 0.1
 snr_gamma = 5.0
 
-run_name = "controlnet-training"
+checkpoints_to_keep = 5
+run_name = "controlnet-training-" + str(int(time.time()))
 
 
 # prob not the best
@@ -84,7 +87,7 @@ epoch = 0
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO,filename=os.path.join(logging_dir, "training.log"), filemode="a")
     os.makedirs(project_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(logging_dir, exist_ok=True)
@@ -121,6 +124,7 @@ def main():
                 "effective_step": effective_step,
                 "global_step": global_step,
                 "epoch": epoch,
+                "run_name": run_name,
             },
             os.path.join(output_dir, "controlnet_config.pth"),
         )
@@ -143,10 +147,12 @@ def main():
         config_path = os.path.join(input_dir, "controlnet_config.pth")
         if os.path.exists(config_path):
             config = load_checkpoint(config_path)
+            global run_name
             nonlocal effective_step, global_step, epoch
             effective_step = config["effective_step"]
             global_step = config["global_step"]
             epoch = config["epoch"]
+            run_name = config["run_name"]
 
         while len(models) > 0:
             model = models.pop()
@@ -184,15 +190,15 @@ def main():
         controlnet.enable_gradient_checkpointing()
 
     if use_torch_compile:
-        controlnet = torch.compile(controlnet)
-        unet = torch.compile(unet)
-        vae = torch.compile(vae)
+        controlnet = cast(ControlNetDEMModel,controlnet.compile(controlnet))
+        unet = cast(UNetDEMConditionModel,unet.compile(unet))
+        vae = cast(AutoencoderKL,torch.compile(vae))
         logger.info("torch.compile enabled")
     params_to_optimize = controlnet.parameters()
 
     if optimizer_type == "8bitadam":
         from bitsandbytes.optim.adamw import AdamW8bit
-        optimizer = optimizer_class(
+        optimizer = AdamW8bit(
             params_to_optimize,
             lr=learning_rate,
             betas=(0.9, 0.999),
@@ -313,7 +319,7 @@ def main():
                 "learning_rate": learning_rate,
                 "gradient_accumulation_steps": gradient_accumulation_steps,
                 "train_batch_size": train_batch_size,
-                "use_8bitadam": use_8bitadam,
+                "optimizer": optimizer_type,
                 "lr_warmup_steps": lr_warmup_steps,
                 "max_train_steps": max_train_steps,
                 "lr_num_cycles": lr_num_cycles,
@@ -333,6 +339,7 @@ def main():
                 "use_torch_compile": use_torch_compile,
                 "resume_from_checkpoint": resume_from_checkpoint,
                 "conditioning_scale": conditioning_scale,
+                "commit": get_commit(),
             }
             config_str = "\n".join([f"{k}: {v}" for k, v in config_dict.items()])
             tracker.writer.add_text("config", config_str, 0)
@@ -476,6 +483,9 @@ def main():
                 if accelerator.sync_gradients:
                     params_to_clip = controlnet.parameters()
                     accelerator.clip_grad_norm_(params_to_clip, max_grad_norm)
+
+                    loss_item=loss.detach().item()
+
                     if (global_step + 1) % log_grad_steps == 0:
                         unwrapped = accelerator.unwrap_model(controlnet)
                         grad_norms = []
@@ -512,9 +522,27 @@ def main():
                             )
                             accelerator.save_state(save_path)
                             logger.info(f"Saved state to {save_path}")
+                            if checkpoints_to_keep > 0:
+                                dirs = os.listdir(output_dir)
+                                dirs = [
+                                    d
+                                    for d in dirs
+                                    if d.startswith("checkpoint")
+                                    and d != f"checkpoint-{global_step}"
+                                ]
+                                if len(dirs) > checkpoints_to_keep - 1:
+                                    dirs = sorted(
+                                        dirs, key=lambda x: int(x.split("-")[1])
+                                    )
+                                    dir_to_remove = dirs[0]
+                                    os.remove(os.path.join(output_dir, dir_to_remove))
+                                    logger.info(
+                                        f"Removed old checkpoint {dir_to_remove}"
+                                    )
+
 
                     logs = {
-                        "loss": loss.detach().item(),
+                        "loss": loss_item,
                         "lr": lr_scheduler.get_last_lr()[0],
                         "effective_step": effective_step,
                         "epoch": epoch,
@@ -529,7 +557,7 @@ def main():
                             logs[f"loss_t{bucket}"] = s / c if c > 0 else float("nan")
                         t_bucket_losses.clear()
                         _diag_accum_n = 0
-                    if global_step % 100 == 0:
+                    if global_step % 500 == 0:
                         del loss, batch, latents
                         torch.cuda.empty_cache()
                         logs["memory"] = torch.cuda.memory_summary()
@@ -560,6 +588,7 @@ def main():
                             logger.info(f"Saved state to {save_path}")
                             break
         if global_step >= max_train_steps:
+            logger.info(f"Reached max training steps ({max_train_steps}). Ending training.")
             break
 
 if __name__ == "__main__":

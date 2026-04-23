@@ -2,8 +2,10 @@ import csv
 import json
 import os
 import random
+import subprocess
 import sys
 from typing import List, Optional, cast
+
 import cv2
 import numpy as np
 import torch
@@ -17,13 +19,25 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.training_utils import EMAModel, compute_snr
 from diffusers.utils.torch_utils import randn_tensor
 from scipy import ndimage
+from skimage.morphology import dilation, disk
 from torch import Tensor
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-from skimage.morphology import dilation, disk
+
 from dataset.feature_map import get_map_combined
 from models import ControlNetDEMModel, UNetDEMConditionModel
-from pipeline_terrain import TerrainDiffusionPipeline, TerrainDiffusionControlNetPipeline
+from pipeline_terrain import (
+    TerrainDiffusionControlNetPipeline,
+    TerrainDiffusionPipeline,
+)
+
+
+def get_commit() -> str:
+    return (
+        subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+        .decode("ascii")
+        .strip()
+    )
 
 
 def parse_args(config: dict):
@@ -127,7 +141,6 @@ def parse_args(config: dict):
         else:
             var_name = args[i].lstrip("-")
             print(f"Warning: {var_name} is not a valid argument.")
-
 
 
 def generate_synthetic_batch(
@@ -247,9 +260,9 @@ def log_validation_controlnet(
                 generator=generator,
                 output_type="pt",
             )
-            dem=dem.float().cpu().numpy()
+            dem = dem.float().cpu().numpy()
             dem = dem[0].transpose(1, 2, 0)
-            image=image.float().cpu().numpy()
+            image = image.float().cpu().numpy()
             image = image[0].transpose(1, 2, 0)
         return image, dem
 
@@ -272,9 +285,7 @@ def log_validation_controlnet(
         )
         prompt_static = "rain forests and mountains in Philippines in November"
 
-        image_static, dem_static = run_inference(
-            prompt_static, feature_map_static
-        )
+        image_static, dem_static = run_inference(prompt_static, feature_map_static)
 
         feature_map_static_np = feature_map_static.cpu().float().numpy()
         feature_map_static_np = feature_map_static_np.transpose(1, 2, 0)
@@ -303,7 +314,8 @@ def cloud_percent_in_batch(batch: dict) -> float:
     total_pixels = cloud_mask.numel()
     cloud_pixels = cloud_mask.sum().item()
     percent_cloud = cloud_pixels / total_pixels if total_pixels > 0 else 0.0
-    return 1-percent_cloud
+    return 1 - percent_cloud
+
 
 def train_controlnet(
     latents: Tensor,
@@ -343,8 +355,12 @@ def train_controlnet(
         noise = torch.randn_like(latents)
 
     if fixed_noisy_latents is not None:
-        assert fixed_noise is not None, "fixed_noisy_latents provided without fixed_noise"
-        assert fixed_t is not None, "fixed_noisy_latents provided without fixed_timestep"
+        assert fixed_noise is not None, (
+            "fixed_noisy_latents provided without fixed_noise"
+        )
+        assert fixed_t is not None, (
+            "fixed_noisy_latents provided without fixed_timestep"
+        )
         noisy_latents = fixed_noisy_latents
     else:
         noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
@@ -430,6 +446,7 @@ def train_controlnet(
         return loss, diag
     return loss
 
+
 def use_canny_feature(batch: dict) -> dict:
     if "feature_map" not in batch:
         return batch
@@ -442,14 +459,19 @@ def use_canny_feature(batch: dict) -> dict:
 
     for i in range(B):
         gray = cv2.cvtColor(np_imgs[i], cv2.COLOR_RGB2GRAY)
-        low=np.percentile(gray, 30)
-        high=np.percentile(gray, 70)
+        low = np.percentile(gray, 30)
+        high = np.percentile(gray, 70)
         edges = cv2.Canny(gray, low, high)
-        edges=dilation(edges, disk(2))
-        results.append(torch.from_numpy(np.stack([edges, edges, edges])).float() / 255.0)
+        edges = dilation(edges, disk(2))
+        results.append(
+            torch.from_numpy(np.stack([edges, edges, edges])).float() / 255.0
+        )
     batch["feature_map"] = torch.stack(results).to(feature_map.device)
-    assert batch["feature_map"].shape == shape, f"Expected shape {shape}, got {batch['feature_map'].shape}"
+    assert batch["feature_map"].shape == shape, (
+        f"Expected shape {shape}, got {batch['feature_map'].shape}"
+    )
     return batch
+
 
 def augment_batch(
     batch: dict,
