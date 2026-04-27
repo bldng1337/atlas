@@ -23,7 +23,7 @@ from pipeline_terrain import (
     TerrainDiffusionPipeline,
     TerrainDiffusionControlNetPipeline,
 )
-from train_utils import generate_synthetic_batch, parse_args, train_controlnet, cloud_percent_in_batch
+from train_utils import generate_synthetic_batch, parse_args, train_controlnet, cloud_percent_in_batch, get_commit
 from tqdm import tqdm
 
 
@@ -52,15 +52,15 @@ upper_bound = None
 num_inference_steps_gen = 25
 xformer = False
 hardcode_step = False
-optimizer_type = "8bitadam"
+optimizer_type = "prodigy"
 snr_gamma = 5.0
 use_torch_compile = False
 name=None
 
 parse_args(globals())
-
 run_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-output_dir = os.path.join("tests", "overfit", name or run_timestamp)
+run_name=name or run_timestamp
+output_dir = os.path.join("tests", "overfit", run_name)
 os.makedirs(output_dir, exist_ok=True)
 print(f"Test results will be saved to: {output_dir}")
 
@@ -473,7 +473,7 @@ results = {
     "has_nan": has_nan,
     "loss_history": loss_history,
     "run_timestamp": run_timestamp,
-    "name": name,
+    "name": run_name,
 }
 with open(os.path.join(output_dir, "results.json"), "w") as f:
     json.dump(sanitize_for_json(results), f, indent=2)
@@ -486,7 +486,7 @@ with open(os.path.join(output_dir, "logs.json"), "w") as f:
     json.dump(sanitize_for_json(logs), f, indent=2)
 
 summary_lines = [
-    f"Overfit Test Results - {name or run_timestamp} [{run_timestamp}]",
+    f"Overfit Test Results - {run_name} [{run_timestamp}]",
     f"{'=' * 60}",
     "CONFIGURATION",
     f"  Steps:             {steps}",
@@ -500,6 +500,7 @@ summary_lines = [
     f"  hardcode_step:    {hardcode_step}",
     f"  snr_gamma:         {snr_gamma}",
     f"{'=' * 60}",
+    f" Commit:            {get_commit()}",
     "RESULTS",
     f"  Initial loss:      {initial_loss:.4f}",
     f"  Final loss:        {final_loss:.4f}",
@@ -633,7 +634,7 @@ if step_logs:
     axes[1, 1].set_xlabel("Step")
     axes[1, 1].grid(True, alpha=0.3)
 
-fig.suptitle(f"Overfit Test – {name or run_timestamp}", fontsize=13)
+fig.suptitle(f"Overfit Test – {run_name}", fontsize=13)
 fig.tight_layout(rect=[0, 0, 1, 0.95])
 _save(fig, "summary.png")
 
