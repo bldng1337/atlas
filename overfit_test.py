@@ -507,10 +507,10 @@ summary_lines = [
     f"  Loss reduction:    {(1 - reduction_ratio) * 100:.1f}%",
     f"  Total time:        {total_time:.1f}s ({total_time / steps * 1000:.0f}ms/step)",
     f"  Has NaN:           {has_nan}",
-    f"  Effective steps:    {effective_step:.1f}"
+    f"  Effective steps:    {effective_step:.1f}",
     f"  First half avg:     {first_half_avg:.4f}",
     f"  Second half avg:    {second_half_avg:.4f}",
-    f" Validation loss Start:   {val_loss_start:.4f}"
+    f" Validation loss Start:   {val_loss_start:.4f}",
     f" Validation loss End:     {val_loss_end:.4f}",
     f" Validation loss reduction: {(1 - val_loss_end / val_loss_start) * 100:.1f}%",
 ]

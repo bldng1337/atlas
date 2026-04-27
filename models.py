@@ -1465,7 +1465,7 @@ class UNetDEMConditionModel(
                 down_block_res_samples, down_block_additional_residuals
             ):
                 down_block_res_sample = (
-                    down_block_res_sample + down_block_additional_residual
+                    down_block_res_sample + down_block_additional_residual.to(dtype=sample.dtype)
                 )
                 new_down_block_res_samples = new_down_block_res_samples + (
                     down_block_res_sample,
@@ -1499,7 +1499,7 @@ class UNetDEMConditionModel(
                 sample += down_intrablock_additional_residuals.pop(0)
 
         if is_controlnet:
-            sample = sample + mid_block_additional_residual
+            sample = sample + mid_block_additional_residual.to(dtype=sample.dtype)
 
         # 5. up
         for i, upsample_block in enumerate(self.up_blocks):

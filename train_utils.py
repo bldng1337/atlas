@@ -77,6 +77,17 @@ def parse_args(config: dict):
                         var_value = int(var_value)
                     elif isinstance(original, float):
                         var_value = float(var_value)
+                    elif original is None:
+                        if var_value.lower() in ("true", "false", "yes", "no", "y", "n"):
+                            var_value = var_value.lower() in ("true", "yes", "y")
+                        else:
+                            try:
+                                var_value = int(var_value)
+                            except ValueError:
+                                try:
+                                    var_value = float(var_value)
+                                except ValueError:
+                                    pass  # keep as string
                     config[var_name] = var_value
                     print(f"Updated {var_name} from .env: {original} => {var_value}")
     args = sys.argv[1:]
@@ -106,6 +117,18 @@ def parse_args(config: dict):
                                 v = int(v)
                             elif isinstance(original, float):
                                 v = float(v)
+                            elif original is None:
+                                if isinstance(v, str):
+                                    if v.lower() in ("true", "false", "yes", "no", "y", "n"):
+                                        v = v.lower() in ("true", "yes", "y")
+                                    else:
+                                        try:
+                                            v = int(v)
+                                        except ValueError:
+                                            try:
+                                                v = float(v)
+                                            except ValueError:
+                                                pass  # keep as string
                             config[k] = v
                             print(
                                 f"Updated {k} from config file({var_value}): {original} => {v}"
@@ -130,6 +153,17 @@ def parse_args(config: dict):
                         var_value = int(var_value)
                     elif isinstance(original, float):
                         var_value = float(var_value)
+                    elif original is None:
+                        if var_value.lower() in ("true", "false", "yes", "no", "y", "n"):
+                            var_value = var_value.lower() in ("true", "yes", "y")
+                        else:
+                            try:
+                                var_value = int(var_value)
+                            except ValueError:
+                                try:
+                                    var_value = float(var_value)
+                                except ValueError:
+                                    pass  # keep as string
 
                     config[var_name] = var_value
                     print(f"Updated {var_name}: {original} => {var_value}")
@@ -280,14 +314,14 @@ def log_validation_controlnet(
 
     with torch.no_grad():
         logger.info("Running static validation...")
-        feature_map_static = feature_map[0].to(
+        feature_map_static = feature_map[0:1].to(
             device=accelerator.device, dtype=weight_dtype
         )
         prompt_static = "rain forests and mountains in Philippines in November"
 
         image_static, dem_static = run_inference(prompt_static, feature_map_static)
 
-        feature_map_static_np = feature_map_static.cpu().float().numpy()
+        feature_map_static_np = feature_map_static[0].cpu().float().numpy()
         feature_map_static_np = feature_map_static_np.transpose(1, 2, 0)
         overlay_static = create_overlay(dem_static, feature_map_static_np, alpha=0.4)
 
@@ -438,7 +472,12 @@ def train_controlnet(
 
     if snr_gamma is not None:
         snr = compute_snr(noise_scheduler=noise_scheduler, timesteps=timesteps).float()
-        snr_weights = torch.clamp(snr, max=snr_gamma) / (snr + 1)
+        base = torch.clamp(snr, max=snr_gamma)
+        if noise_scheduler.config["prediction_type"] == "v_prediction":
+            snr_weights = base / (snr + 1)
+        else:
+            snr_weights = base / snr
+            snr_weights[snr == 0] = 1.0
         mse = mse.mean(dim=[1, 2, 3]) * snr_weights
 
     loss = mse.mean()

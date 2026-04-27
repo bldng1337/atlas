@@ -1821,6 +1821,8 @@ class TerrainDiffusionControlNetPipeline(
             ]
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+        controlnet_cond: Optional[torch.Tensor] = None,
+        conditioning_scale: float = 1.0,
         **kwargs,
     ):
         r"""
@@ -2060,6 +2062,25 @@ class TerrainDiffusionControlNetPipeline(
                     latent_model_input, t
                 )
 
+                # ControlNet forward pass
+                if controlnet_cond is not None:
+                    controlnet_cond_input = (
+                        torch.cat([controlnet_cond] * 2)
+                        if self.do_classifier_free_guidance
+                        else controlnet_cond
+                    )
+                    down_block_res_samples, mid_block_res_sample = self.controlnet(
+                        latent_model_input,
+                        t,
+                        encoder_hidden_states=prompt_embeds,
+                        controlnet_cond=controlnet_cond_input,
+                        conditioning_scale=conditioning_scale,
+                        return_dict=False,
+                    )
+                else:
+                    down_block_res_samples = None
+                    mid_block_res_sample = None
+
                 # predict the noise residual
                 noise_pred = self.unet(
                     latent_model_input,
@@ -2069,6 +2090,8 @@ class TerrainDiffusionControlNetPipeline(
                     cross_attention_kwargs=self.cross_attention_kwargs,
                     added_cond_kwargs=added_cond_kwargs,
                     down_intrablock_additional_residuals=adapter_features,
+                    down_block_additional_residuals=down_block_res_samples,
+                    mid_block_additional_residual=mid_block_res_sample,
                     return_dict=False,
                 )[0]
 

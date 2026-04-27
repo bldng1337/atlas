@@ -3,6 +3,7 @@ from typing import cast
 import functools
 import os
 import logging
+import shutil
 import torch
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -80,17 +81,14 @@ checkpoints_to_keep = 5
 run_name = "controlnet-training-" + str(int(time.time()))
 
 
-# prob not the best
-effective_step = 0
-global_step = 0
-epoch = 0
-
-
 def main():
-    logging.basicConfig(level=logging.INFO,filename=os.path.join(logging_dir, "training.log"), filemode="a")
+    effective_step = 0
+    global_step = 0
+    epoch = 0
     os.makedirs(project_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(logging_dir, exist_ok=True)
+    logging.basicConfig(level=logging.INFO,filename=os.path.join(logging_dir, "training.log"), filemode="a")
     scheduler = SchedulerType[scheduler_type.upper()]
     accelerator_project_config = ProjectConfiguration(
         project_dir=project_dir,
@@ -118,6 +116,10 @@ def main():
         load_weights_from_unet=True,
     )
 
+    t_avg_loss_sum = 0.0
+    t_avg_loss_count = 0
+    _diag_accum_n = 0
+
     def save_model_hook(models, weights, output_dir):
         torch.save(
             {
@@ -125,6 +127,9 @@ def main():
                 "global_step": global_step,
                 "epoch": epoch,
                 "run_name": run_name,
+                "t_avg_loss_sum": t_avg_loss_sum,
+                "t_avg_loss_count": t_avg_loss_count,
+                "_diag_accum_n": _diag_accum_n,
             },
             os.path.join(output_dir, "controlnet_config.pth"),
         )
@@ -132,8 +137,10 @@ def main():
         while len(weights) > 0:
             weights.pop()
             model = models[i]
+            unwrapped = model._orig_mod if hasattr(model, '_orig_mod') else model
             torch.save(
-                model.state_dict(), os.path.join(output_dir, "model_%02d.pth" % i)
+                unwrapped.state_dict(),
+                os.path.join(output_dir, "model_%02d.pth" % i)
             )
             i -= 1
 
@@ -148,11 +155,14 @@ def main():
         if os.path.exists(config_path):
             config = load_checkpoint(config_path)
             global run_name
-            nonlocal effective_step, global_step, epoch
+            nonlocal effective_step, global_step, epoch, t_avg_loss_sum, t_avg_loss_count, _diag_accum_n
             effective_step = config["effective_step"]
             global_step = config["global_step"]
             epoch = config["epoch"]
             run_name = config["run_name"]
+            t_avg_loss_sum = config.get("t_avg_loss_sum", 0.0)
+            t_avg_loss_count = config.get("t_avg_loss_count", 0)
+            _diag_accum_n = config.get("_diag_accum_n", 0)
 
         while len(models) > 0:
             model = models.pop()
@@ -171,7 +181,7 @@ def main():
     if attention_backend == "xformers":
         unet.enable_xformers_memory_efficient_attention()
         controlnet.enable_xformers_memory_efficient_attention()
-    elif attention_backend in "sdpa":
+    elif attention_backend == "sdpa":
         from diffusers.models.attention_processor import AttnProcessor2_0
 
         unet.set_attn_processor(AttnProcessor2_0())
@@ -190,8 +200,8 @@ def main():
         controlnet.enable_gradient_checkpointing()
 
     if use_torch_compile:
-        controlnet = cast(ControlNetDEMModel,controlnet.compile(controlnet))
-        unet = cast(UNetDEMConditionModel,unet.compile(unet))
+        controlnet = cast(ControlNetDEMModel,torch.compile(controlnet))
+        unet = cast(UNetDEMConditionModel,torch.compile(unet))
         vae = cast(AutoencoderKL,torch.compile(vae))
         logger.info("torch.compile enabled")
     params_to_optimize = controlnet.parameters()
@@ -260,11 +270,11 @@ def main():
     train_dataloader = DataLoader(
         train_dataset,  # ty:ignore[invalid-argument-type]
         batch_size=train_batch_size,
+        shuffle=not streaming,
         drop_last=True,
         num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=num_workers > 0,
-        multiprocessing_context="fork" if num_workers > 0 else None,
         worker_init_fn=WorkerInitializer(mesa_path),
     )
 
@@ -291,7 +301,7 @@ def main():
     logger.info(
         f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
     )
-    if "sdpa" in attention_backend:
+    if attention_backend=="sdpa":
         if torch.backends.cuda.is_flash_attention_available() and mixed_precision in [
             "fp16",
             "bf16",
@@ -308,6 +318,31 @@ def main():
     logger.info(f"  Mixed precision = {mixed_precision}")
     logger.info(f" Device = {accelerator.device}")
     global resume_from_checkpoint
+    if resume_from_checkpoint is not None:
+        path = None
+        if resume_from_checkpoint == "latest":
+            dirs = os.listdir(output_dir)
+            dirs = [d for d in dirs if d.startswith("checkpoint")]
+            if len(dirs) > 0:
+                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+                path = dirs[-1]
+            else:
+                logger.info(
+                    f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
+                )
+                resume_from_checkpoint = None
+        else:
+            path = resume_from_checkpoint
+
+        if path is not None:
+            logger.info(f"Resuming from checkpoint {path}")
+            try:
+                accelerator.load_state(os.path.join(output_dir, path))
+                initial_global_step = global_step
+            except (RuntimeError, Exception) as e:
+                logger.warning(f"Failed to load checkpoint {path}: {e}. Starting a new training run.")
+                resume_from_checkpoint = None
+
     if accelerator.is_main_process:
         accelerator.init_trackers(run_name)
         tracker = accelerator.get_tracker("tensorboard")
@@ -344,32 +379,8 @@ def main():
             config_str = "\n".join([f"{k}: {v}" for k, v in config_dict.items()])
             tracker.writer.add_text("config", config_str, 0)
 
-    global_step = 0
-    first_epoch = 0
-    initial_global_step = 0
-    effective_step = 0
-
-    if resume_from_checkpoint is not None:
-        path = None
-        if resume_from_checkpoint == "latest":
-            dirs = os.listdir(output_dir)
-            dirs = [d for d in dirs if d.startswith("checkpoint")]
-            if len(dirs) > 0:
-                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-                path = dirs[-1]
-            else:
-                logger.info(
-                    f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
-                )
-                resume_from_checkpoint = None
-        else:
-            path = resume_from_checkpoint
-
-        if path is not None:
-            logger.info(f"Resuming from checkpoint {path}")
-            accelerator.load_state(os.path.join(output_dir, path))
-            global_step = int(path.split("-")[1])
-            initial_global_step = global_step
+    first_epoch = epoch
+    initial_global_step = global_step
 
     map_batch = next(iter(train_dataloader))
     if feature == "canny":
@@ -404,7 +415,6 @@ def main():
 
     cn_norm_accum = {}
     t_bucket_losses = {}
-    _diag_accum_n = 0
 
     progress_bar = tqdm(
         range(0, max_train_steps),
@@ -471,8 +481,11 @@ def main():
                     bucket = t // 250
                     if bucket not in t_bucket_losses:
                         t_bucket_losses[bucket] = [0.0, 0]
-                    t_bucket_losses[bucket][0] += _loss_val / _n_t
+                    per_t_loss = _loss_val / _n_t
+                    t_bucket_losses[bucket][0] += per_t_loss
                     t_bucket_losses[bucket][1] += 1
+                    t_avg_loss_sum += per_t_loss
+                    t_avg_loss_count += 1
 
                 effective_step += (
                     cloud_percent_in_batch(batch) / gradient_accumulation_steps
@@ -503,12 +516,19 @@ def main():
                             grad_stats["mean_grad"] = float("nan")
                             grad_stats["max_grad"] = float("nan")
                         param_max = float("-inf")
+                        param_mean = 0.0
+                        param_count = 0
                         for block in unwrapped.controlnet_down_blocks:
                             for p in block.parameters():
                                 param_max = max(param_max, p.data.abs().max().item())
+                                param_mean += p.data.abs().sum().item()
+                                param_count += p.data.numel()
                         for p in unwrapped.controlnet_mid_block.parameters():
                             param_max = max(param_max, p.data.abs().max().item())
+                            param_mean += p.data.abs().sum().item()
+                            param_count += p.data.numel()
                         grad_stats["max_param_weight"] = param_max
+                        grad_stats["mean_param_weight"] = param_mean / param_count if param_count > 0 else float("nan")
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=set_grads_to_none)
                 if accelerator.sync_gradients:
@@ -535,7 +555,13 @@ def main():
                                         dirs, key=lambda x: int(x.split("-")[1])
                                     )
                                     dir_to_remove = dirs[0]
-                                    os.remove(os.path.join(output_dir, dir_to_remove))
+                                    checkpoint_to_remove = os.path.join(
+                                        output_dir, dir_to_remove
+                                    )
+                                    if os.path.isdir(checkpoint_to_remove):
+                                        shutil.rmtree(checkpoint_to_remove)
+                                    else:
+                                        os.remove(checkpoint_to_remove)
                                     logger.info(
                                         f"Removed old checkpoint {dir_to_remove}"
                                     )
@@ -544,18 +570,31 @@ def main():
                     logs = {
                         "loss": loss_item,
                         "lr": lr_scheduler.get_last_lr()[0],
-                        "effective_step": effective_step,
+                        "step_ratio": effective_step/global_step if global_step > 0 else 0.0,
                         "epoch": epoch,
                     }
                     progress_bar.set_postfix(**logs)
+                    grad_stats={f"controlnet/grad_stats/{k}": v for k, v in grad_stats.items()}
+                    logs={f"train/{k}": v for k, v in logs.items()}
                     logs.update(grad_stats)
                     if grad_stats:
                         for key in cn_norm_accum:
-                            logs[key] = cn_norm_accum[key] / _diag_accum_n
+                            logs[f"controlnet/norms/{key}"] = (
+                                cn_norm_accum[key] / _diag_accum_n
+                            )
                         cn_norm_accum.clear()
                         for bucket, (s, c) in sorted(t_bucket_losses.items()):
-                            logs[f"loss_t{bucket}"] = s / c if c > 0 else float("nan")
+                            logs[f"loss/bucket_t{bucket}"] = (
+                                s / c if c > 0 else float("nan")
+                            )
+                        logs["loss/avg"] = (
+                            t_avg_loss_sum / t_avg_loss_count
+                            if t_avg_loss_count > 0
+                            else float("nan")
+                        )
                         t_bucket_losses.clear()
+                        t_avg_loss_sum = 0.0
+                        t_avg_loss_count = 0
                         _diag_accum_n = 0
                     if global_step % 500 == 0:
                         del loss, batch, latents
@@ -563,6 +602,7 @@ def main():
                         logs["memory"] = torch.cuda.memory_summary()
                     accelerator.log(logs, step=global_step)
 
+                    should_stop = global_step >= max_train_steps
                     if accelerator.is_main_process:
                         if global_step % validation_steps == 0:
                             log_validation_controlnet(
@@ -580,16 +620,22 @@ def main():
                                 global_step,
                             )
 
-                        if global_step >= max_train_steps:
+                        if should_stop:
                             save_path = os.path.join(
                                 output_dir, f"checkpoint-{global_step}"
                             )
                             accelerator.save_state(save_path)
                             logger.info(f"Saved state to {save_path}")
-                            break
+                    if should_stop:
+                        accelerator.wait_for_everyone()
+                        break
         if global_step >= max_train_steps:
-            logger.info(f"Reached max training steps ({max_train_steps}). Ending training.")
+            if accelerator.is_main_process:
+                logger.info(
+                    f"Reached max training steps ({max_train_steps}). Ending training."
+                )
             break
+    accelerator.end_training()
 
 if __name__ == "__main__":
     parse_args(globals())
