@@ -6,9 +6,11 @@ import numpy as np
 import PIL.Image as PILImage
 import torch
 from rasterio.io import MemoryFile
-
-from dataset.feature_map import get_map_combined
-
+try:
+    from dataset.feature_map import get_map_combined
+except ImportError:
+    def get_map_combined(*args, **kwargs):
+        raise NotImplementedError("Feature map generation is not available. Please ensure the 'richdem' module is properly installed.")
 _worker_tokenizer = None
 
 class WorkerInitializer:

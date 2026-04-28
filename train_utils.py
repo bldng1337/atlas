@@ -23,8 +23,11 @@ from skimage.morphology import dilation, disk
 from torch import Tensor
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-
-from dataset.feature_map import get_map_combined
+try:
+    from dataset.feature_map import get_map_combined
+except ImportError:
+    def get_map_combined(*args, **kwargs):
+        raise NotImplementedError("Feature map generation is not available. Please ensure the 'richdem' module is properly installed.")
 from models import ControlNetDEMModel, UNetDEMConditionModel
 from pipeline_terrain import (
     TerrainDiffusionControlNetPipeline,
