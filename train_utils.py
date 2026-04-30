@@ -23,16 +23,33 @@ from skimage.morphology import dilation, disk
 from torch import Tensor
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
+
 try:
     from dataset.feature_map import get_map_combined
 except ImportError:
+
     def get_map_combined(*args, **kwargs):
-        raise NotImplementedError("Feature map generation is not available. Please ensure the 'richdem' module is properly installed.")
+        raise NotImplementedError(
+            "Feature map generation is not available. Please ensure the 'richdem' module is properly installed."
+        )
+
+
 from models import ControlNetDEMModel, UNetDEMConditionModel
 from pipeline_terrain import (
     TerrainDiffusionControlNetPipeline,
     TerrainDiffusionPipeline,
 )
+
+
+def create_feature_map(dem, feature):
+    if dem is Tensor:
+        dem = dem.float().cpu().numpy()
+        dem = dem[0].transpose(1, 2, 0)
+    if feature == "canny":
+        return get_canny(dem).transpose(1,2,0)
+    elif feature == "ridges":
+        map, _ =get_map_combined(dem)
+        return map
 
 
 def get_commit() -> str:
@@ -81,7 +98,14 @@ def parse_args(config: dict):
                     elif isinstance(original, float):
                         var_value = float(var_value)
                     elif original is None:
-                        if var_value.lower() in ("true", "false", "yes", "no", "y", "n"):
+                        if var_value.lower() in (
+                            "true",
+                            "false",
+                            "yes",
+                            "no",
+                            "y",
+                            "n",
+                        ):
                             var_value = var_value.lower() in ("true", "yes", "y")
                         else:
                             try:
@@ -122,7 +146,14 @@ def parse_args(config: dict):
                                 v = float(v)
                             elif original is None:
                                 if isinstance(v, str):
-                                    if v.lower() in ("true", "false", "yes", "no", "y", "n"):
+                                    if v.lower() in (
+                                        "true",
+                                        "false",
+                                        "yes",
+                                        "no",
+                                        "y",
+                                        "n",
+                                    ):
                                         v = v.lower() in ("true", "yes", "y")
                                     else:
                                         try:
@@ -157,7 +188,14 @@ def parse_args(config: dict):
                     elif isinstance(original, float):
                         var_value = float(var_value)
                     elif original is None:
-                        if var_value.lower() in ("true", "false", "yes", "no", "y", "n"):
+                        if var_value.lower() in (
+                            "true",
+                            "false",
+                            "yes",
+                            "no",
+                            "y",
+                            "n",
+                        ):
                             var_value = var_value.lower() in ("true", "yes", "y")
                         else:
                             try:
@@ -263,6 +301,7 @@ def log_validation_controlnet(
     guidance_scale=7.5,
     num_random_validations=3,
     conditioning_scale=1.0,
+    isCanny=False,
 ):
     logger = get_logger(__name__)
     logger.info("Running validation...")
@@ -324,9 +363,14 @@ def log_validation_controlnet(
 
         image_static, dem_static = run_inference(prompt_static, feature_map_static)
 
+
         feature_map_static_np = feature_map_static[0].cpu().float().numpy()
         feature_map_static_np = feature_map_static_np.transpose(1, 2, 0)
         overlay_static = create_overlay(dem_static, feature_map_static_np, alpha=0.4)
+
+        feature_extract= create_feature_map((dem_static.transpose(2, 0, 1)[0]*255).astype(np.uint8), "canny" if isCanny else "ridges")
+
+        feature_mIoU= mIoU(feature_extract, feature_map_static_np)
 
         if accelerator.is_main_process:
             tracker = accelerator.get_tracker("tensorboard")
@@ -339,6 +383,18 @@ def log_validation_controlnet(
                     overlay_static,
                     step,
                     dataformats="HWC",
+                )
+                tracker.writer.add_images(
+                    "validation/static/dem", dem_static, step, dataformats="HWC"
+                )
+                tracker.writer.add_images(
+                    "validation/static/extracted_feature",
+                    feature_extract,
+                    step,
+                    dataformats="HWC",
+                )
+                tracker.writer.add_scalar(
+                    "validation/static/feature_mIoU", feature_mIoU, step
                 )
 
     controlnet.train()
@@ -489,6 +545,34 @@ def train_controlnet(
     return loss
 
 
+def get_canny(img: np.ndarray) -> np.ndarray:
+    if len(img.shape) == 3 and img.shape[2] == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = img.copy()
+
+    sobelx = cv2.Sobel(gray.astype(np.float32), cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(gray.astype(np.float32), cv2.CV_64F, 0, 1, ksize=3)
+    mag = np.sqrt(sobelx**2 + sobely**2)
+
+    low = float(np.percentile(mag, 1))
+    high = float(np.percentile(mag, 99))
+
+    edges = cv2.Canny(gray, low, high)
+    edges = dilation(edges, disk(1))
+    return np.stack([edges, edges, edges])
+
+
+def feature_percent_in_batch(batch: dict) -> float:
+    if "feature_map" not in batch:
+        return 0.0
+    feature_map = cast(Tensor, batch["feature_map"])
+    total_pixels = feature_map.numel()
+    feature_pixels = (feature_map > 0).sum().item()
+    percent_feature = feature_pixels / total_pixels if total_pixels > 0 else 0.0
+    return percent_feature
+
+
 def use_canny_feature(batch: dict) -> dict:
     if "feature_map" not in batch:
         return batch
@@ -500,19 +584,27 @@ def use_canny_feature(batch: dict) -> dict:
     np_imgs = (feature_map.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
 
     for i in range(B):
-        gray = cv2.cvtColor(np_imgs[i], cv2.COLOR_RGB2GRAY)
-        low = np.percentile(gray, 30)
-        high = np.percentile(gray, 70)
-        edges = cv2.Canny(gray, low, high)
-        edges = dilation(edges, disk(2))
-        results.append(
-            torch.from_numpy(np.stack([edges, edges, edges])).float() / 255.0
-        )
+        map = torch.from_numpy(get_canny(np_imgs[i])).float()
+        max = map.max()
+        min = map.min()
+        if max > min:
+            map = (map - min) / (max - min)
+        results.append(map)
     batch["feature_map"] = torch.stack(results).to(feature_map.device)
     assert batch["feature_map"].shape == shape, (
         f"Expected shape {shape}, got {batch['feature_map'].shape}"
     )
     return batch
+
+
+def mIoU(pred: np.ndarray, target: np.ndarray) -> float:
+    """pred, target: (H, W, C)"""
+    pred_b = pred > 0.5
+    target_b = target > 0.5
+    intersection = (pred_b & target_b).sum(axis=(0, 1))
+    union = (pred_b | target_b).sum(axis=(0, 1))
+    iou_per_class = np.where(union > 0, intersection / union, np.nan)
+    return float(np.nanmean(iou_per_class))
 
 
 def augment_batch(

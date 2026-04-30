@@ -24,7 +24,7 @@ from train_utils import (
     parse_args,
     train_controlnet,
     use_canny_feature,
-    cloud_percent_in_batch, get_commit,
+    cloud_percent_in_batch, get_commit,feature_percent_in_batch
 )
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -79,7 +79,6 @@ snr_gamma = 5.0
 
 checkpoints_to_keep = 5
 run_name = "controlnet-training-" + str(int(time.time()))
-
 
 def main():
     effective_step = 0
@@ -388,6 +387,14 @@ def main():
     validation_feature = map_batch["feature_map"].to(accelerator.device)
     del map_batch
 
+    from PIL import Image
+    import numpy as np
+
+    validation_feature_np = validation_feature.cpu().numpy()
+    validation_feature_image = (validation_feature_np[0].transpose(1, 2, 0) * 255).astype(np.uint8)
+    validation_image = Image.fromarray(validation_feature_image)
+    validation_image.save(os.path.join(logging_dir, "validation_feature.png"))
+
     if accelerator.is_main_process:
         log_validation_controlnet(
             unet,
@@ -402,6 +409,7 @@ def main():
             height,
             width,
             global_step,
+            isCanny=(feature == "canny")
         )
 
     empty_token_ids = tokenizer(
@@ -415,6 +423,7 @@ def main():
 
     cn_norm_accum = {}
     t_bucket_losses = {}
+    efficiency_accum = {}
 
     progress_bar = tqdm(
         range(0, max_train_steps),
@@ -487,9 +496,15 @@ def main():
                     t_avg_loss_sum += per_t_loss
                     t_avg_loss_count += 1
 
+                cloud_percent = cloud_percent_in_batch(batch) / gradient_accumulation_steps
+                feature_percent = feature_percent_in_batch(batch) / gradient_accumulation_steps
+
                 effective_step += (
-                    cloud_percent_in_batch(batch) / gradient_accumulation_steps
+                    cloud_percent
                 )
+
+                efficiency_accum["cloud_percent"] = efficiency_accum.get("cloud_percent", 0.0) + cloud_percent
+                efficiency_accum["feature_percent"] = efficiency_accum.get("feature_percent", 0.0) + feature_percent
 
                 accelerator.backward(loss)
                 grad_stats = {}
@@ -570,16 +585,19 @@ def main():
                     logs = {
                         "loss": loss_item,
                         "lr": lr_scheduler.get_last_lr()[0],
-                        "step_ratio": effective_step/global_step if global_step > 0 else 0.0,
+                        "effective_step": effective_step,
                         "epoch": epoch,
                     }
                     progress_bar.set_postfix(**logs)
-                    grad_stats={f"controlnet/grad_stats/{k}": v for k, v in grad_stats.items()}
+                    grad_stats={f"controlnet_grad_stats/{k}": v for k, v in grad_stats.items()}
                     logs={f"train/{k}": v for k, v in logs.items()}
                     logs.update(grad_stats)
+                    efficiency_accum={f"efficiency/{k}": v / _diag_accum_n for k, v in efficiency_accum.items()}
+                    logs.update(efficiency_accum)
+                    efficiency_accum.clear()
                     if grad_stats:
                         for key in cn_norm_accum:
-                            logs[f"controlnet/norms/{key}"] = (
+                            logs[f"controlnet_norms/{key}"] = (
                                 cn_norm_accum[key] / _diag_accum_n
                             )
                         cn_norm_accum.clear()
@@ -618,6 +636,7 @@ def main():
                                 height,
                                 width,
                                 global_step,
+                                isCanny=(feature == "canny")
                             )
 
                         if should_stop:
