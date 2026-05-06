@@ -522,7 +522,7 @@ def main():
                     cloud_percent
                 )
 
-                efficiency_accum["cloud_percent"] = efficiency_accum.get("cloud_percent", 0.0) + (1-cloud_percent)
+                efficiency_accum["cloud_percent"] = efficiency_accum.get("cloud_percent", 0.0) + cloud_percent
                 efficiency_accum["feature_percent"] = efficiency_accum.get("feature_percent", 0.0) + feature_percent
 
                 accelerator.backward(loss)
@@ -611,6 +611,7 @@ def main():
                     grad_stats={f"controlnet_grad_stats/{k}": v for k, v in grad_stats.items()}
                     logs={f"train/{k}": v for k, v in logs.items()}
                     logs.update(grad_stats)
+                    efficiency_accum["cloud_percent"]=1-efficiency_accum["cloud_percent"]# We flip it here so its more intuitive to track the percent of the image that is NOT covered by clouds, which is what the model is actually learning from
                     efficiency_accum={f"efficiency/{k}": v for k, v in efficiency_accum.items()}
                     logs.update(efficiency_accum)
                     efficiency_accum.clear()
