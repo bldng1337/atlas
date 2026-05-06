@@ -42,7 +42,7 @@ from pipeline_terrain import (
 
 
 def create_feature_map(dem, feature):
-    if dem is Tensor:
+    if isinstance(dem, Tensor):
         dem = dem.float().cpu().numpy()
         dem = dem[0].transpose(1, 2, 0)
     if feature == "canny":
@@ -294,7 +294,6 @@ def log_validation_controlnet(
     height,
     width,
     step,
-    terrain_pipeline=None,
     gen_prompts=None,
     generator=None,
     num_inference_steps=50,
@@ -325,17 +324,34 @@ def log_validation_controlnet(
 
     def run_inference(prompt, feature_map):
         with torch.no_grad():
-            image, dem = pipeline(
-                controlnet_cond=feature_map,
-                conditioning_scale=conditioning_scale,
-                prompt=prompt,
-                height=height,
-                width=width,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                generator=generator,
-                output_type="pt",
-            )
+            if not isinstance(prompt, str) and not ((isinstance(prompt, list) or isinstance(prompt, tuple)) and isinstance(prompt[0], str)):
+                if isinstance(prompt, Tensor) and prompt.ndim == 1:
+                    prompt = prompt.unsqueeze(0)
+                prompt_embeds = text_encoder(prompt)[0]
+                print("Using prompt_embeds for validation inference")
+                image, dem = pipeline(
+                    controlnet_cond=feature_map,
+                    conditioning_scale=conditioning_scale,
+                    prompt_embeds=prompt_embeds,
+                    height=height,
+                    width=width,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                    output_type="pt",
+                )
+            else:
+                image, dem = pipeline(
+                    controlnet_cond=feature_map,
+                    conditioning_scale=conditioning_scale,
+                    prompt=prompt,
+                    height=height,
+                    width=width,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                    output_type="pt",
+                )
             dem = dem.float().cpu().numpy()
             dem = dem[0].transpose(1, 2, 0)
             image = image.float().cpu().numpy()
@@ -356,48 +372,56 @@ def log_validation_controlnet(
 
     with torch.no_grad():
         logger.info("Running static validation...")
-        feature_map_static = feature_map[0:1].to(
-            device=accelerator.device, dtype=weight_dtype
-        )
-        prompt_static = "rain forests and mountains in Philippines in November"
+        mIoU_scores = 0
+        mIoU_count = 0
+        for i,feature in enumerate(feature_map):
+            if gen_prompts is not None and i < len(gen_prompts):
+                prompt_static = gen_prompts[i]
+            else:
+                prompt_static = "rain forests and mountains in Philippines in November"
+            feature_map_static = feature.to(
+                device=accelerator.device, dtype=weight_dtype
+            ).unsqueeze(0)
+            image_static, dem_static = run_inference(prompt_static, feature_map_static)
 
-        image_static, dem_static = run_inference(prompt_static, feature_map_static)
+            feature_map_static_np = feature_map_static[0].cpu().float().numpy()
+            feature_map_static_np = feature_map_static_np.transpose(1, 2, 0)
+            overlay_static = create_overlay(dem_static, feature_map_static_np, alpha=0.4)
 
+            feature_extract= create_feature_map((dem_static.transpose(2, 0, 1)[0]*255).astype(np.uint8), "canny" if isCanny else "ridges")
 
-        feature_map_static_np = feature_map_static[0].cpu().float().numpy()
-        feature_map_static_np = feature_map_static_np.transpose(1, 2, 0)
-        overlay_static = create_overlay(dem_static, feature_map_static_np, alpha=0.4)
+            feature_mIoU= mIoU(feature_extract, feature_map_static_np)
+            mIoU_scores+= feature_mIoU
+            mIoU_count+=1
 
-        feature_extract= create_feature_map((dem_static.transpose(2, 0, 1)[0]*255).astype(np.uint8), "canny" if isCanny else "ridges")
-
-        feature_mIoU= mIoU(feature_extract, feature_map_static_np)
-
-        if accelerator.is_main_process:
-            tracker = accelerator.get_tracker("tensorboard")
-            if tracker:
-                tracker.writer.add_images(
-                    "validation/static/img", image_static, step, dataformats="HWC"
-                )
-                tracker.writer.add_images(
-                    "validation/static/overlay",
-                    overlay_static,
-                    step,
-                    dataformats="HWC",
-                )
-                tracker.writer.add_images(
-                    "validation/static/dem", dem_static, step, dataformats="HWC"
-                )
-                tracker.writer.add_images(
-                    "validation/static/extracted_feature",
-                    feature_extract,
-                    step,
-                    dataformats="HWC",
-                )
-                tracker.writer.add_scalar(
-                    "validation/static/feature_mIoU", feature_mIoU, step
-                )
-
+            if accelerator.is_main_process:
+                tracker = accelerator.get_tracker("tensorboard")
+                if tracker:
+                    tracker.writer.add_images(
+                        f"validation/static/img_{i}", image_static, step, dataformats="HWC"
+                    )
+                    tracker.writer.add_images(
+                        f"validation/static/overlay_{i}",
+                        overlay_static,
+                        step,
+                        dataformats="HWC",
+                    )
+                    tracker.writer.add_images(
+                        f"validation/static/dem_{i}", dem_static, step, dataformats="HWC"
+                    )
+                    tracker.writer.add_images(
+                        f"validation/static/extracted_feature_{i}",
+                        feature_extract,
+                        step,
+                        dataformats="HWC",
+                    )
+                    tracker.writer.add_scalar(
+                        "validation/static/feature_mIoU", mIoU_scores/mIoU_count, step
+                    )
+    unet.eval()
     controlnet.train()
+    vae.eval()
+    text_encoder.eval()
 
 
 def cloud_percent_in_batch(batch: dict) -> float:

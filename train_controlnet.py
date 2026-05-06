@@ -78,6 +78,7 @@ feature_dropout_prob = 0.1
 snr_gamma = 5.0
 
 checkpoints_to_keep = 5
+num_validation_images = 4
 run_name = "controlnet-training-" + str(int(time.time()))
 
 def main():
@@ -373,6 +374,7 @@ def main():
                 "use_torch_compile": use_torch_compile,
                 "resume_from_checkpoint": resume_from_checkpoint,
                 "conditioning_scale": conditioning_scale,
+                "num_validation_images": num_validation_images,
                 "commit": get_commit(),
             }
             config_str = "\n".join([f"{k}: {v}" for k, v in config_dict.items()])
@@ -381,19 +383,34 @@ def main():
     first_epoch = epoch
     initial_global_step = global_step
 
-    map_batch = next(iter(train_dataloader))
-    if feature == "canny":
-        map_batch = use_canny_feature(map_batch)
-    validation_feature = map_batch["feature_map"].to(accelerator.device)
-    del map_batch
-
     from PIL import Image
     import numpy as np
 
-    validation_feature_np = validation_feature.cpu().numpy()
-    validation_feature_image = (validation_feature_np[0].transpose(1, 2, 0) * 255).astype(np.uint8)
-    validation_image = Image.fromarray(validation_feature_image)
-    validation_image.save(os.path.join(logging_dir, "validation_feature.png"))
+    val_iter = iter(train_dataloader)
+    _val_features = []
+    _val_prompts = []
+    while len(_val_prompts) < num_validation_images:
+        try:
+            _vbatch = next(val_iter)
+        except StopIteration:
+            break
+        if feature == "canny":
+            _vbatch = use_canny_feature(_vbatch)
+        _val_features.append(_vbatch["feature_map"])
+        _val_prompts.extend(_vbatch["txt"])
+        del _vbatch
+    if not _val_features:
+        logger.warning("No validation batches collected, skipping validation setup")
+    validation_feature = torch.cat(_val_features, dim=0)[:num_validation_images].to(accelerator.device)
+    validation_prompts = _val_prompts[:num_validation_images]
+    del _val_features, _val_prompts, val_iter
+
+    for _si in range(min(num_validation_images, validation_feature.shape[0])):
+        _feat_np = validation_feature[_si].cpu().numpy()
+        _feat_img = (_feat_np.transpose(1, 2, 0) * 255).astype(np.uint8)
+        Image.fromarray(_feat_img).save(
+            os.path.join(logging_dir, f"validation_feature_{_si}.png")
+        )
 
     if accelerator.is_main_process:
         log_validation_controlnet(
@@ -409,6 +426,7 @@ def main():
             height,
             width,
             global_step,
+            gen_prompts=validation_prompts,
             isCanny=(feature == "canny")
         )
 
@@ -424,6 +442,7 @@ def main():
     cn_norm_accum = {}
     t_bucket_losses = {}
     efficiency_accum = {}
+
 
     progress_bar = tqdm(
         range(0, max_train_steps),
@@ -496,14 +515,14 @@ def main():
                     t_avg_loss_sum += per_t_loss
                     t_avg_loss_count += 1
 
-                cloud_percent = cloud_percent_in_batch(batch) / gradient_accumulation_steps
+                cloud_percent = cloud_percent_in_batch(batch) / gradient_accumulation_steps#maybe an unfortunate name but this tracks the percent of the cloud MASK so how much of the image is covered by clouds
                 feature_percent = feature_percent_in_batch(batch) / gradient_accumulation_steps
 
                 effective_step += (
                     cloud_percent
                 )
 
-                efficiency_accum["cloud_percent"] = efficiency_accum.get("cloud_percent", 0.0) + cloud_percent
+                efficiency_accum["cloud_percent"] = efficiency_accum.get("cloud_percent", 0.0) + (1-cloud_percent)
                 efficiency_accum["feature_percent"] = efficiency_accum.get("feature_percent", 0.0) + feature_percent
 
                 accelerator.backward(loss)
@@ -592,7 +611,7 @@ def main():
                     grad_stats={f"controlnet_grad_stats/{k}": v for k, v in grad_stats.items()}
                     logs={f"train/{k}": v for k, v in logs.items()}
                     logs.update(grad_stats)
-                    efficiency_accum={f"efficiency/{k}": v / _diag_accum_n for k, v in efficiency_accum.items()}
+                    efficiency_accum={f"efficiency/{k}": v for k, v in efficiency_accum.items()}
                     logs.update(efficiency_accum)
                     efficiency_accum.clear()
                     if grad_stats:
@@ -636,6 +655,7 @@ def main():
                                 height,
                                 width,
                                 global_step,
+                                gen_prompts=validation_prompts,
                                 isCanny=(feature == "canny")
                             )
 
