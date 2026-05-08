@@ -1,4 +1,5 @@
 import csv
+import gc
 import json
 import os
 import random
@@ -321,41 +322,39 @@ def log_validation_controlnet(
         image_encoder=None,  # ty:ignore[invalid-argument-type]
         requires_safety_checker=False,
     )
+    # Reduce peak VRAM during diffusion inference
+    pipeline.enable_vae_slicing()
 
     def run_inference(prompt, feature_map):
-        with torch.no_grad():
-            if not isinstance(prompt, str) and not ((isinstance(prompt, list) or isinstance(prompt, tuple)) and isinstance(prompt[0], str)):
-                if isinstance(prompt, Tensor) and prompt.ndim == 1:
-                    prompt = prompt.unsqueeze(0)
-                prompt_embeds = text_encoder(prompt)[0]
-                print("Using prompt_embeds for validation inference")
-                image, dem = pipeline(
-                    controlnet_cond=feature_map,
-                    conditioning_scale=conditioning_scale,
-                    prompt_embeds=prompt_embeds,
-                    height=height,
-                    width=width,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    generator=generator,
-                    output_type="pt",
-                )
-            else:
-                image, dem = pipeline(
-                    controlnet_cond=feature_map,
-                    conditioning_scale=conditioning_scale,
-                    prompt=prompt,
-                    height=height,
-                    width=width,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    generator=generator,
-                    output_type="pt",
-                )
-            dem = dem.float().cpu().numpy()
-            dem = dem[0].transpose(1, 2, 0)
-            image = image.float().cpu().numpy()
-            image = image[0].transpose(1, 2, 0)
+        if not isinstance(prompt, str) and not ((isinstance(prompt, list) or isinstance(prompt, tuple)) and isinstance(prompt[0], str)):
+            if isinstance(prompt, Tensor) and prompt.ndim == 1:
+                prompt = prompt.unsqueeze(0)
+            prompt_embeds = text_encoder(prompt)[0]
+            image, dem = pipeline(
+                controlnet_cond=feature_map,
+                conditioning_scale=conditioning_scale,
+                prompt_embeds=prompt_embeds,
+                height=height,
+                width=width,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                generator=generator,
+                output_type="pt",
+            )
+        else:
+            image, dem = pipeline(
+                controlnet_cond=feature_map,
+                conditioning_scale=conditioning_scale,
+                prompt=prompt,
+                height=height,
+                width=width,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                generator=generator,
+                output_type="pt",
+            )
+        dem = dem.cpu().float().numpy()[0].transpose(1, 2, 0)
+        image = image.cpu().float().numpy()[0].transpose(1, 2, 0)
         return image, dem
 
     def create_overlay(dem, feature_map, alpha=0.4):
@@ -370,11 +369,11 @@ def log_validation_controlnet(
 
         return overlay
 
-    with torch.no_grad():
+    with torch.inference_mode():
         logger.info("Running static validation...")
         mIoU_scores = 0
         mIoU_count = 0
-        for i,feature in enumerate(feature_map):
+        for i, feature in enumerate(feature_map):
             if gen_prompts is not None and i < len(gen_prompts):
                 prompt_static = gen_prompts[i]
             else:
@@ -384,15 +383,20 @@ def log_validation_controlnet(
             ).unsqueeze(0)
             image_static, dem_static = run_inference(prompt_static, feature_map_static)
 
-            feature_map_static_np = feature_map_static[0].cpu().float().numpy()
-            feature_map_static_np = feature_map_static_np.transpose(1, 2, 0)
+            # Free GPU tensor now that inference is done
+            del feature_map_static
+
+            feature_map_static_np = feature.cpu().float().numpy().transpose(1, 2, 0)
             overlay_static = create_overlay(dem_static, feature_map_static_np, alpha=0.4)
 
-            feature_extract= create_feature_map((dem_static.transpose(2, 0, 1)[0]*255).astype(np.uint8), "canny" if isCanny else "ridges")
+            feature_extract = create_feature_map(
+                (dem_static.transpose(2, 0, 1)[0] * 255).astype(np.uint8),
+                "canny" if isCanny else "ridges",
+            )
 
-            feature_mIoU= mIoU(feature_extract, feature_map_static_np)
-            mIoU_scores+= feature_mIoU
-            mIoU_count+=1
+            feature_mIoU = mIoU(feature_extract, feature_map_static_np)
+            mIoU_scores += feature_mIoU
+            mIoU_count += 1
 
             if accelerator.is_main_process:
                 tracker = accelerator.get_tracker("tensorboard")
@@ -415,9 +419,20 @@ def log_validation_controlnet(
                         step,
                         dataformats="HWC",
                     )
-                    tracker.writer.add_scalar(
-                        "validation/static/feature_mIoU", mIoU_scores/mIoU_count, step
-                    )
+
+        if accelerator.is_main_process:
+            tracker.writer.add_scalar(
+                "validation/static/feature_mIoU", mIoU_scores / mIoU_count, step
+            )
+
+        del image_static, dem_static, overlay_static, feature_extract, feature_map_static_np
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    del pipeline
+    gc.collect()
+    torch.cuda.empty_cache()
+
     unet.eval()
     controlnet.train()
     vae.eval()
