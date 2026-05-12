@@ -64,7 +64,7 @@ lower_bound = None
 upper_bound = None
 feature = "ridges"
 
-regenerate_feature_map = False
+regenerate_feature_map = True
 augment = False
 enable_random_crop = False
 crop_scale = 0.8

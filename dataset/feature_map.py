@@ -173,11 +173,11 @@ def get_map_combined(
     canny_high_threshold = random.uniform(0.12, 0.18)
     cliff_slope_percentile = random.uniform(70.0, 80.0)
     flat_slope_percentile = random.uniform(15.0, 25.0)
-    thickness = random.randint(3, 6)
-    min_feature_size = random.randint(60, 120)
-    line_sigma = random.uniform(0.15, 0.3)
-    min_dropout_rate = random.uniform(0.15, 0.25)
-    max_dropout_rate = random.uniform(0.7, 0.9)
+    thickness = 2#random.randint(3, 6)
+    min_feature_size = 60#random.randint(60, 120)
+    line_sigma = 0.15#random.uniform(0.15, 0.3)
+    min_dropout_rate = 0.15#random.uniform(0.15, 0.25)
+    max_dropout_rate = 0.35#random.uniform(0.7, 0.9)
 
     maps, flat = extract_terrain_features(
         dem,
