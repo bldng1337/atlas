@@ -1,9 +1,10 @@
+import functools
+import logging
+import os
+import shutil
 import time
 from typing import cast
-import functools
-import os
-import logging
-import shutil
+
 import torch
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -16,16 +17,19 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
-from dataprep import preprocess, WorkerInitializer
+from dataprep import WorkerInitializer, preprocess
 from models import ControlNetDEMModel, UNetDEMConditionModel
 from train_utils import (
     augment_batch,
+    cloud_percent_in_batch,
+    feature_percent_in_batch,
+    get_commit,
     log_validation_controlnet,
     parse_args,
     train_controlnet,
     use_canny_feature,
-    cloud_percent_in_batch, get_commit,feature_percent_in_batch
 )
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 dataset_path = "bldng/atlas2"
@@ -60,8 +64,10 @@ use_torch_compile = True
 resume_from_checkpoint = None
 conditioning_scale = 1.0
 conditioning_channels = 3
-lower_bound = None
-upper_bound = None
+lower_bound_dem = None
+upper_bound_dem = None
+lower_bound_img = None
+upper_bound_img = None
 feature = "ridges"
 
 regenerate_feature_map = True
@@ -81,6 +87,7 @@ checkpoints_to_keep = 5
 num_validation_images = 4
 run_name = "controlnet-training-" + str(int(time.time()))
 
+
 def main():
     effective_step = 0
     global_step = 0
@@ -88,7 +95,11 @@ def main():
     os.makedirs(project_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(logging_dir, exist_ok=True)
-    logging.basicConfig(level=logging.INFO,filename=os.path.join(logging_dir, "training.log"), filemode="a")
+    logging.basicConfig(
+        level=logging.INFO,
+        filename=os.path.join(logging_dir, "training.log"),
+        filemode="a",
+    )
     scheduler = SchedulerType[scheduler_type.upper()]
     accelerator_project_config = ProjectConfiguration(
         project_dir=project_dir,
@@ -137,10 +148,9 @@ def main():
         while len(weights) > 0:
             weights.pop()
             model = models[i]
-            unwrapped = model._orig_mod if hasattr(model, '_orig_mod') else model
+            unwrapped = model._orig_mod if hasattr(model, "_orig_mod") else model
             torch.save(
-                unwrapped.state_dict(),
-                os.path.join(output_dir, "model_%02d.pth" % i)
+                unwrapped.state_dict(), os.path.join(output_dir, "model_%02d.pth" % i)
             )
             i -= 1
 
@@ -155,7 +165,13 @@ def main():
         if os.path.exists(config_path):
             config = load_checkpoint(config_path)
             global run_name
-            nonlocal effective_step, global_step, epoch, t_avg_loss_sum, t_avg_loss_count, _diag_accum_n
+            nonlocal \
+                effective_step, \
+                global_step, \
+                epoch, \
+                t_avg_loss_sum, \
+                t_avg_loss_count, \
+                _diag_accum_n
             effective_step = config["effective_step"]
             global_step = config["global_step"]
             epoch = config["epoch"]
@@ -200,14 +216,15 @@ def main():
         controlnet.enable_gradient_checkpointing()
 
     if use_torch_compile:
-        controlnet = cast(ControlNetDEMModel,torch.compile(controlnet))
-        unet = cast(UNetDEMConditionModel,torch.compile(unet))
-        vae = cast(AutoencoderKL,torch.compile(vae))
+        controlnet = cast(ControlNetDEMModel, torch.compile(controlnet))
+        unet = cast(UNetDEMConditionModel, torch.compile(unet))
+        vae = cast(AutoencoderKL, torch.compile(vae))
         logger.info("torch.compile enabled")
     params_to_optimize = controlnet.parameters()
 
     if optimizer_type == "8bitadam":
         from bitsandbytes.optim.adamw import AdamW8bit
+
         optimizer = AdamW8bit(
             params_to_optimize,
             lr=learning_rate,
@@ -225,9 +242,10 @@ def main():
         )
     elif optimizer_type == "prodigy":
         from prodigyopt import Prodigy
+
         optimizer = Prodigy(
             params_to_optimize,
-            lr=1.,
+            lr=1.0,
             d_coef=1.0,
             weight_decay=1e-2,
             decouple=True,
@@ -236,7 +254,6 @@ def main():
         )
     else:
         raise ValueError(f"Unsupported optimizer type: {optimizer_type}")
-
 
     vae.to(accelerator.device, dtype=weight_dtype)
     vae.eval()
@@ -262,8 +279,10 @@ def main():
         tokenizer=None,
         height=height,
         width=width,
-        lower_bound=lower_bound,
-        upper_bound=upper_bound,
+        lower_bound_dem=lower_bound_dem,
+        upper_bound_dem=upper_bound_dem,
+        lower_bound_img=lower_bound_img,
+        upper_bound_img=upper_bound_img,
         tokenizer_path=mesa_path,
         generate_features=regenerate_feature_map,
     )
@@ -301,7 +320,7 @@ def main():
     logger.info(
         f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
     )
-    if attention_backend=="sdpa":
+    if attention_backend == "sdpa":
         if torch.backends.cuda.is_flash_attention_available() and mixed_precision in [
             "fp16",
             "bf16",
@@ -340,7 +359,9 @@ def main():
                 accelerator.load_state(os.path.join(output_dir, path))
                 initial_global_step = global_step
             except (RuntimeError, Exception) as e:
-                logger.warning(f"Failed to load checkpoint {path}: {e}. Starting a new training run.")
+                logger.warning(
+                    f"Failed to load checkpoint {path}: {e}. Starting a new training run."
+                )
                 resume_from_checkpoint = None
 
     if accelerator.is_main_process:
@@ -383,8 +404,8 @@ def main():
     first_epoch = epoch
     initial_global_step = global_step
 
-    from PIL import Image
     import numpy as np
+    from PIL import Image
 
     val_iter = iter(train_dataloader)
     _val_features = []
@@ -401,7 +422,9 @@ def main():
         del _vbatch
     if not _val_features:
         logger.warning("No validation batches collected, skipping validation setup")
-    validation_feature = torch.cat(_val_features, dim=0)[:num_validation_images].to(accelerator.device)
+    validation_feature = torch.cat(_val_features, dim=0)[:num_validation_images].to(
+        accelerator.device
+    )
     validation_prompts = _val_prompts[:num_validation_images]
     del _val_features, _val_prompts, val_iter
 
@@ -427,7 +450,7 @@ def main():
             width,
             global_step,
             gen_prompts=validation_prompts,
-            isCanny=(feature == "canny")
+            isCanny=(feature == "canny"),
         )
 
     empty_token_ids = tokenizer(
@@ -442,7 +465,6 @@ def main():
     cn_norm_accum = {}
     t_bucket_losses = {}
     efficiency_accum = {}
-
 
     progress_bar = tqdm(
         range(0, max_train_steps),
@@ -493,7 +515,7 @@ def main():
                     weight_dtype=weight_dtype,
                     conditioning_scale=conditioning_scale,
                     return_diagnostics=True,
-                    snr_gamma=snr_gamma
+                    snr_gamma=snr_gamma,
                 )
 
                 _diag_accum_n += 1
@@ -515,15 +537,21 @@ def main():
                     t_avg_loss_sum += per_t_loss
                     t_avg_loss_count += 1
 
-                cloud_percent = cloud_percent_in_batch(batch) / gradient_accumulation_steps#maybe an unfortunate name but this tracks the percent of the cloud MASK so how much of the image is covered by clouds
-                feature_percent = feature_percent_in_batch(batch) / gradient_accumulation_steps
-
-                effective_step += (
-                    cloud_percent
+                cloud_percent = (
+                    cloud_percent_in_batch(batch) / gradient_accumulation_steps
+                )  # maybe an unfortunate name but this tracks the percent of the cloud MASK so how much of the image is covered by clouds
+                feature_percent = (
+                    feature_percent_in_batch(batch) / gradient_accumulation_steps
                 )
 
-                efficiency_accum["cloud_percent"] = efficiency_accum.get("cloud_percent", 0.0) + cloud_percent
-                efficiency_accum["feature_percent"] = efficiency_accum.get("feature_percent", 0.0) + feature_percent
+                effective_step += cloud_percent
+
+                efficiency_accum["cloud_percent"] = (
+                    efficiency_accum.get("cloud_percent", 0.0) + cloud_percent
+                )
+                efficiency_accum["feature_percent"] = (
+                    efficiency_accum.get("feature_percent", 0.0) + feature_percent
+                )
 
                 accelerator.backward(loss)
                 grad_stats = {}
@@ -531,7 +559,7 @@ def main():
                     params_to_clip = controlnet.parameters()
                     accelerator.clip_grad_norm_(params_to_clip, max_grad_norm)
 
-                    loss_item=loss.detach().item()
+                    loss_item = loss.detach().item()
 
                     if (global_step + 1) % log_grad_steps == 0:
                         unwrapped = accelerator.unwrap_model(controlnet)
@@ -562,7 +590,11 @@ def main():
                             param_mean += p.data.abs().sum().item()
                             param_count += p.data.numel()
                         grad_stats["max_param_weight"] = param_max
-                        grad_stats["mean_param_weight"] = param_mean / param_count if param_count > 0 else float("nan")
+                        grad_stats["mean_param_weight"] = (
+                            param_mean / param_count
+                            if param_count > 0
+                            else float("nan")
+                        )
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=set_grads_to_none)
                 if accelerator.sync_gradients:
@@ -600,7 +632,6 @@ def main():
                                         f"Removed old checkpoint {dir_to_remove}"
                                     )
 
-
                     logs = {
                         "loss": loss_item,
                         "lr": lr_scheduler.get_last_lr()[0],
@@ -608,11 +639,17 @@ def main():
                         "epoch": epoch,
                     }
                     progress_bar.set_postfix(**logs)
-                    grad_stats={f"controlnet_grad_stats/{k}": v for k, v in grad_stats.items()}
-                    logs={f"train/{k}": v for k, v in logs.items()}
+                    grad_stats = {
+                        f"controlnet_grad_stats/{k}": v for k, v in grad_stats.items()
+                    }
+                    logs = {f"train/{k}": v for k, v in logs.items()}
                     logs.update(grad_stats)
-                    efficiency_accum["cloud_percent"]=1-efficiency_accum["cloud_percent"]# We flip it here so its more intuitive to track the percent of the image that is NOT covered by clouds, which is what the model is actually learning from
-                    efficiency_accum={f"efficiency/{k}": v for k, v in efficiency_accum.items()}
+                    efficiency_accum["cloud_percent"] = (
+                        1 - efficiency_accum["cloud_percent"]
+                    )  # We flip it here so its more intuitive to track the percent of the image that is NOT covered by clouds, which is what the model is actually learning from
+                    efficiency_accum = {
+                        f"efficiency/{k}": v for k, v in efficiency_accum.items()
+                    }
                     logs.update(efficiency_accum)
                     efficiency_accum.clear()
                     if grad_stats:
@@ -657,7 +694,7 @@ def main():
                                 width,
                                 global_step,
                                 gen_prompts=validation_prompts,
-                                isCanny=(feature == "canny")
+                                isCanny=(feature == "canny"),
                             )
 
                         if should_stop:
@@ -676,6 +713,7 @@ def main():
                 )
             break
     accelerator.end_training()
+
 
 if __name__ == "__main__":
     parse_args(globals())

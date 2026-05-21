@@ -6,12 +6,19 @@ import numpy as np
 import PIL.Image as PILImage
 import torch
 from rasterio.io import MemoryFile
+
 try:
     from dataset.feature_map import get_map_combined
 except ImportError:
+
     def get_map_combined(*args, **kwargs):
-        raise NotImplementedError("Feature map generation is not available. Please ensure the 'richdem' module is properly installed.")
+        raise NotImplementedError(
+            "Feature map generation is not available. Please ensure the 'richdem' module is properly installed."
+        )
+
+
 _worker_tokenizer = None
+
 
 class WorkerInitializer:
     def __init__(self, tokenizer_path: str):
@@ -20,9 +27,11 @@ class WorkerInitializer:
     def __call__(self, worker_id: int):
         global _worker_tokenizer
         from transformers import CLIPTokenizer
+
         _worker_tokenizer = CLIPTokenizer.from_pretrained(
             self.tokenizer_path, subfolder="tokenizer", use_fast=False
         )
+
 
 def norm(data, center=True):
     lo, hi = data.min(), data.max()
@@ -50,7 +59,7 @@ def decode_feature(batch, width=768, height=768):
     return result
 
 
-def decode_img(batch, width=768, height=768):
+def decode_img(batch, width=768, height=768, lower_bound=None, upper_bound=None):
     bands = []
     for key in ("B04", "B03", "B02"):
         bbytes = batch[key]
@@ -64,7 +73,14 @@ def decode_img(batch, width=768, height=768):
 
     arr_rgb = np.stack(bands, axis=-1)
     arr_rgb = cv2.resize(arr_rgb, (width, height), interpolation=cv2.INTER_LINEAR)
-    arr_rgb = norm(arr_rgb)
+    if lower_bound is not None and upper_bound is not None:
+        arr_rgb = np.clip(
+            ((arr_rgb - lower_bound) / (upper_bound - lower_bound)) * 2.0 - 1.0,
+            -1.0,
+            1.0,
+        )
+    else:
+        arr_rgb = norm(arr_rgb)
     del bands
     return arr_rgb
 
@@ -79,7 +95,7 @@ def decode_dem(batch, width=768, height=768, lower_bound=None, upper_bound=None)
 
     if lower_bound is not None and upper_bound is not None:
         result = np.clip(
-            ((dem - lower_bound) / (upper_bound - lower_bound)) * 2.0 - 1.0, -1.5, 1.5
+            ((dem - lower_bound) / (upper_bound - lower_bound)) * 2.0 - 1.0, -1.0, 1.0
         )
     else:
         result = norm(dem)
@@ -106,8 +122,10 @@ def preprocess(
     height,
     tokenizer_path=None,
     proportion_empty_prompts=0,
-    lower_bound=None,
-    upper_bound=None,
+    lower_bound_dem=None,
+    upper_bound_dem=None,
+    lower_bound_img=None,
+    upper_bound_img=None,
     generate_features=False,
     **kwargs,
 ):
@@ -115,6 +133,7 @@ def preprocess(
         tokenizer = _worker_tokenizer
     if tokenizer is None and tokenizer_path is not None:
         from transformers import CLIPTokenizer
+
         tokenizer = CLIPTokenizer.from_pretrained(tokenizer_path, subfolder="tokenizer")
     batch_size = len(batch)
 
@@ -126,12 +145,12 @@ def preprocess(
 
     for idx, data in enumerate(batch):
         # Process image
-        img_arr = decode_img(data, width, height)
+        img_arr = decode_img(data, width, height, lower_bound_img, upper_bound_img)
         imgs[idx] = torch.from_numpy(img_arr).permute(2, 0, 1)
         del img_arr
 
         # Process DEM
-        dem_arr = decode_dem(data, width, height, lower_bound, upper_bound)
+        dem_arr = decode_dem(data, width, height, lower_bound_dem, upper_bound_dem)
         dem_tensor = torch.from_numpy(dem_arr).unsqueeze(0)
         dems[idx] = dem_tensor.expand(3, -1, -1)
         del dem_tensor

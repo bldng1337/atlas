@@ -15,5 +15,9 @@
   "num_workers": 4,
   "regenerate_feature_map": true,
   "seed": 42,
-  "resume_from_checkpoint": "latest"
+  "resume_from_checkpoint": "latest",
+  "lower_bound_dem": -3929.95,
+  "upper_bound_dem": 5922.07,
+  "lower_bound_img": -2167.55,
+  "upper_bound_img": 7356.05
 }

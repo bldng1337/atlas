@@ -2,7 +2,6 @@
 # References:
 # https://github.com/huggingface/diffusers/
 ###########################################################################
-from models import ControlNetDEMModel
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -43,6 +42,8 @@ from transformers import (
     CLIPTokenizer,
     CLIPVisionModelWithProjection,
 )
+
+from models import ControlNetDEMModel
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -886,7 +887,6 @@ class TerrainDiffusionPipeline(
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         **kwargs,
     ):
-
         if adapter_features is not None:
             adapter_features = [
                 torch.cat([s] * 2, dim=0).to(self.device, dtype=torch.float16)
