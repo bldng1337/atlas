@@ -158,7 +158,9 @@ def preprocess(
         # Process feature map
         if generate_features:
             fmaps[idx] = torch.zeros((3, height, width), dtype=torch.float32)
-            feature_map, _ = get_map_combined(dem_arr * 1000, dem_size=width, **kwargs)
+            feature_map, _ = get_map_combined(
+                ((dem_arr + 1) / 2) * 1000, dem_size=width, **kwargs
+            )
             feature_map = cv2.resize(
                 feature_map, (width, height), interpolation=cv2.INTER_LINEAR
             )
