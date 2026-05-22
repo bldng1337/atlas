@@ -24,7 +24,7 @@
 	doi=true,
 	backref=true,
 	backrefstyle=three}
-	
+
 \RequirePackage{csquotes}				% recommended for biblatex
 
 %% set up dictionary terms
@@ -91,24 +91,24 @@
 \defbibheading{noheader}[]{}		% 'none' should be defined but isn't
 
 %Assign a given bibliography entry to one of the defined categories.
-\newcommand{\@AssignToBibCategory}[1]% argument 1: entry key 
+\newcommand{\@AssignToBibCategory}[1]% argument 1: entry key
 {\ifthenelse{%
 		\ifentrytype{online}\OR
 		\ifentrytype{www}}
 	{\addtocategory{online}{#1}}%
-{\ifthenelse{%
-		\ifentrytype{movie}\OR
-		\ifentrytype{video}\OR
-		\ifentrytype{music}\OR
-		\ifentrytype{audio}\OR
-		\ifentrytype{image}}
-	{\addtocategory{media}{#1}}%
-{\ifthenelse{%
-		\ifentrytype{software}\OR
-		\ifentrytype{electronic}}
-	{\addtocategory{software}{#1}}%
-	{\addtocategory{literature}{#1}}% else (default)
-}}}
+	{\ifthenelse{%
+			\ifentrytype{movie}\OR
+			\ifentrytype{video}\OR
+			\ifentrytype{music}\OR
+			\ifentrytype{audio}\OR
+			\ifentrytype{image}}
+		{\addtocategory{media}{#1}}%
+		{\ifthenelse{%
+				\ifentrytype{software}\OR
+				\ifentrytype{electronic}}
+			{\addtocategory{software}{#1}}%
+			{\addtocategory{literature}{#1}}% else (default)
+		}}}
 
 %Hook provided by biblatex.
 \AtEveryCitekey{\@AssignToBibCategory{\thefield{entrykey}}}
@@ -119,7 +119,7 @@
 	\addbibresource{#1}%
 }
 
-% Declare a source map so the sorting in \cite commands works across the bib
+% Declare a source map so the sorting in~\cite commands works across the bib
 % categories. % The maps need to correspond to the entry types in the bib
 % categories (which unfortunately can't be used directly). The source map adds
 % the presort field with values from A to D that is responsible for sorting in
@@ -186,18 +186,18 @@
 }
 
 %See http://www.jr-x.de/publikationen/latex/tipps/zeilenumbruch.html
-\newenvironment{bibhyphenation}% 
-	{\hyphenpenalty=2%		(default 50)
-	 \tolerance=9999%			(default 200)
-	 \exhyphenpenalty=2%	(default 50)
-	 \linepenalty=1%			(default 10)
-	 \setlength{\emergencystretch}{3em}%
-	 % allow URL hyphenation at any character (definitions in biblatex.def)
-	 \setcounter{biburlnumpenalty}{1}%
-	 \setcounter{biburlucpenalty}{1}%
-	 \setcounter{biburllcpenalty}{1}%
-	 \biburlsetup}%
-	{}
+\newenvironment{bibhyphenation}%
+{\hyphenpenalty=2%		(default 50)
+	\tolerance=9999%			(default 200)
+	\exhyphenpenalty=2%	(default 50)
+	\linepenalty=1%			(default 10)
+	\setlength{\emergencystretch}{3em}%
+	% allow URL hyphenation at any character (definitions in biblatex.def)
+	\setcounter{biburlnumpenalty}{1}%
+	\setcounter{biburlucpenalty}{1}%
+	\setcounter{biburllcpenalty}{1}%
+	\biburlsetup}%
+{}
 
 % Currently the only public macro:
 % \MakeBibliography ... creates a reference section split subsections (default)
@@ -206,27 +206,27 @@
 	% opt. arg (#1): optional argument "nosplit" to get a 1-piece bibliography
 	%\clearpage
 	\ifthenelse{\equal{#1}{nosplit}}%
-		{% create a single bibliography with all entries:
-			\printbibheading[heading=bibintoc,title={\@bibtitle}]
-			\begin{bibhyphenation}	
-				\begin{refcontext}[sorting=nosplit]
-					\printbibliography[heading=noheader]
-				\end{refcontext}
-			\end{bibhyphenation}
-		}%
-		{% split the bibliography using the predefined categories:
-			\printbibheading[heading=bibintoc,title={\@bibtitle}]
-			\begin{bibhyphenation}
-				\bibbycategory
-			\end{bibhyphenation}
-		}%
+	{% create a single bibliography with all entries:
+		\printbibheading[heading=bibintoc,title={\@bibtitle}]
+		\begin{bibhyphenation}
+			\begin{refcontext}[sorting=nosplit]
+				\printbibliography[heading=noheader]
+			\end{refcontext}
+		\end{bibhyphenation}
+	}%
+	{% split the bibliography using the predefined categories:
+		\printbibheading[heading=bibintoc,title={\@bibtitle}]
+		\begin{bibhyphenation}
+			\bibbycategory
+		\end{bibhyphenation}
+	}%
 }
 
-% Suppress unusual "In:" within journal article references. 
+% Suppress unusual "In:" within journal article references.
 % see http://tex.stackexchange.com/questions/10682/suppress-in-biblatex
 \renewbibmacro{in:}{%
 	\ifentrytype{article}{}{%
-	\printtext{\bibstring{in}\intitlepunct}}}
+		\printtext{\bibstring{in}\intitlepunct}}}
 
 
 % To suppress warnings related to missing biblatex "drivers":
@@ -243,12 +243,12 @@
 % Remove the contents of the url field if a doi field is present
 % To avoid duplicate DOI URLs
 \AtEveryBibitem{
-    \iffieldundef{doi}{}{\clearfield{url}}
+	\iffieldundef{doi}{}{\clearfield{url}}
 }
 
 
-% Use a semicolon between multiple entries in \cites
-%\renewcommand*{\multicitedelim}{\addsemicolon\space}		%% abandoned, affects regular \cite{a,b,c,..} entries too
+% Use a semicolon between multiple entries in~\cites
+%\renewcommand*{\multicitedelim}{\addsemicolon\space}		%% abandoned, affects regular~\cite{a,b,c,..} entries too
 
 % New command for multiple citations with supplementary texts
 % usage: \mcite[text1]{key1}[text2]{key2}...[textN]{keyN}
@@ -257,33 +257,30 @@
 
 
 % Macro to produce cites with no backref entries
-% NOTE: \citenobr is DEPRECATED, use ... {\backtrackerfalse\cite{...}} instead!
+% NOTE:~\citenobr is DEPRECATED, use ... {\backtrackerfalse\cite{...}} instead!
 \ifthenelse{\equal{\@bibstyle}{apa}}
 {
 	\DeclareCiteCommand{\citenobr}% version for APA
-		{\PackageWarning{hgb}{Macro \protect\citenobr\space is deprecated, use \protect\backtrackerfalse\space instead!}
-		 \backtrackerfalse%
-		 \usebibmacro{prenote}}
-		{\usebibmacro{citeindex}%
-		 \usebibmacro{cite}}%
-		{\multicitedelim}
-		{\usebibmacro{postnote}}
+	{\PackageWarning{hgb}{Macro \protect\citenobr\space is deprecated, use \protect\backtrackerfalse\space instead!}
+		\backtrackerfalse%
+		\usebibmacro{prenote}}
+	{\usebibmacro{citeindex}%
+		\usebibmacro{cite}}%
+	{\multicitedelim}
+	{\usebibmacro{postnote}}
 }
 {
 	\DeclareCiteCommand{\citenobr}%	version for numeric-comp et al.
-		{\PackageWarning{hgb}{Macro \protect\citenobr\space is deprecated, use \protect\backtrackerfalse\space instead!}
-		 \usebibmacro{cite:init}%
-		 \bibopenbracket%
-		 \backtrackerfalse%
-		 \usebibmacro{prenote}%
-		}
-		{\usebibmacro{citeindex}%
-		 \usebibmacro{cite:comp}}
-		{}
-		{\usebibmacro{cite:dump}%
-		 \usebibmacro{postnote}%
-		 \bibclosebracket}
+	{\PackageWarning{hgb}{Macro \protect\citenobr\space is deprecated, use \protect\backtrackerfalse\space instead!}
+		\usebibmacro{cite:init}%
+		\bibopenbracket%
+		\backtrackerfalse%
+		\usebibmacro{prenote}%
+	}
+	{\usebibmacro{citeindex}%
+		\usebibmacro{cite:comp}}
+	{}
+	{\usebibmacro{cite:dump}%
+		\usebibmacro{postnote}%
+		\bibclosebracket}
 }
-	
-	
-	
