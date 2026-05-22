@@ -5,11 +5,6 @@ This chapter presents the experimental setup, training process, and evaluation o
 
 \section{Training Variants}
 \label{sec:training_variants}
-% One vs Two guided hints
-% SNR Weighting
-% Prodigy, Adam, Adam8bit
-% bf16 vs fp16
-% T2I vs ControlNet
 
 There are several key training variants explored in this thesis, each designed to investigate different aspects of conditioning and optimization for the ControlNet architecture. The primary variants include:
 
@@ -22,16 +17,11 @@ There are several key training variants explored in this thesis, each designed t
 
 \section{Overfit Experiments}
 \label{sec:overfit_experiments}
-% Testing training stability and convergence with different configurations
 
 To keep the training runs manageable, most experiments were conducted on a small subset of the data first to test for training stability and convergence. This included overfitting on a single sample or a small batch of samples to ensure that the model can learn to reproduce the conditioning maps accurately before scaling up to the full dataset. These preliminary experiments were crucial for debugging the training pipeline, validating the implementation of the ControlNet architecture, and doing a preliminary assessment of different training variants.
 
 \section{Full Training Run}
 \label{sec:final_training_run}
-% SNR-weighted loss, Prodigy, Ridge, 2 hints, 16k steps
-% mIoU breakthrough at step 8 to 10k, then random fluctuations
-% ControlNet Norms show increasing influence of the control signal over time, with the two breakouts at 11k and 15k steps causes by run restarts.
-% Bucket loss and total loss too noisy to interpret and overall only fluctuate around the same level.
 
 The full training run was conducted using the SNR-weighted loss function, the Prodigy optimizer, and the configuration with two separate guided hints for each head. The training was performed for a total of 16\,000 steps on the MajorTOM~\cite{schulz2024majortom} dataset, with periodic evaluation of the validation mean Intersection over Union every 1\,000 steps. The training metrics, shown in Figure~\ref{fig:training_metrics}, indicate a significant breakthrough in mIoU around steps 8\,000 to 10\,000, where the model begins to effectively learn the conditioning maps. However, after this initial improvement, the mIoU exhibits random fluctuations, suggesting that while the model has learned to some extent, it may still be struggling with consistent generalization. The norms of the ControlNet residual outputs per block show an increasing influence of the control signal over time, with noticeable breakouts at steps 11\,000 and 15\,000, which were caused by run restarts. The bucket loss and total loss metrics are too noisy to interpret clearly, as they fluctuate around the same level throughout the training process, indicating that they may not be reliable indicators of training progress in this context.
 
@@ -44,8 +34,6 @@ The full training run was conducted using the SNR-weighted loss function, the Pr
 
 \subsection{Baseline Comparisons}
 \label{sec:baseline_comparisons}
-% Control weighting sweep on same seed
-% With increases in w the generated landscape progressively conforms to the spatial structure encoded in the control map but the visual quality decreases steadily
 
 The control weighting sweep, shown in Figure~\ref{fig:control_weight_sweep}, demonstrates the effect of varying the conditioning scale $w$ on the generated terrain. All images were produced with the same random seed ($42$), the same text prompt (\enquote{A Sentinel-2 image of subpolar forests and mountains in Chile in January}), and the same ridge/valley/cliff control map. As $w$ increases the generated landscape progressively conforms to the spatial structure.
 
@@ -58,9 +46,6 @@ The control weighting sweep, shown in Figure~\ref{fig:control_weight_sweep}, dem
 
 \subsection{Quantitative Evaluation}
 \label{sec:quantitative_evaluation}
-% Metrics for evaluating the steerability of generated landscapes
-% Valleys achieve the highest alignment, while cliffs show the lowest.
-% Spread is pretty high which could be due to the fact that the model is undertrained or there is a more general issue esp. in conjunction with the flattening of the generated landscapes at higher control weights.
 
 The quantitative evaluation of the generated landscapes was conducted by calculating the Intersection over Union between the extracted terrain features from the generated Digital Elevation Models and the original conditioning maps. The distribution of IoU scores across 100 generated terrain samples with a control weight of $w = 1.4$ is shown in Figure~\ref{fig:iou_distribution}. The results indicate that valleys achieve the highest alignment with the conditioning maps, with a mean IoU ($\mu$) of approximately $0.117$, while cliffs show the lowest alignment, with a mean IoU of $0.0$. The spread of IoU scores is quite high for all channels, which could be attributed to the model being undertrained or potentially due to a more general issue in conjunction with the observed flattening of the generated landscapes at higher control weights. This variability suggests that while some samples conform well to the conditioning maps, others may struggle to capture the intended features accurately, highlighting areas for further improvement in training and model architecture.
 
@@ -73,8 +58,6 @@ The quantitative evaluation of the generated landscapes was conducted by calcula
 
 \subsection{Qualitative Analysis}
 \label{sec:qualitative_analysis}
-% Visual comparison of generated landscapes
-% With increases in w the generated landscape progressively conforms to the spatial structure encoded in the control map but the visual quality decreases steadily becoming flatter and less detailed.
 
 The Qualitative comparison of generated satellite imagery across different control weights $w$ and conditioning maps is shown in Figure~\ref{fig:qualitative_comparison}. Each row corresponds to a different validation feature map (Sample~1--4), and each column shows the result of a different conditioning scale ($w = 0.0, 0.5, 1.0, 1.5, 2.0$). The leftmost column displays the control map used as input to the ControlNet, where channels encode valleys (R), ridges (G), and cliffs (B). At $w = 0.0$, the model receives no conditioning signal and produces purely text-guided outputs, which exhibit a high degree of visual quality but lack alignment with the intended terrain features. As $w$ increases, the generated landscape progressively conforms to the spatial structure encoded in the control map while lower values allow the model greater creative freedom, yielding landscapes that are less constrained by the control signal. However, as $w$ increases, there is a noticeable decrease in visual quality, with higher weights leading to the overall image becoming flatter and less detailed.
 
@@ -88,8 +71,6 @@ The Qualitative comparison of generated satellite imagery across different contr
 
 \subsection{Training Data Normalization}
 \label{sec:training_data_normalization}
-% Flattern output may point to a difference in training data distribution vs. the pretrained model's original training data, which could be due to the fact that the DEMs were normalized to a [-1, 1] range while the pretrained model may have been trained on a different range or type of data. This mismatch in data distribution can lead to difficulties in learning and may cause the model to produce flatter outputs as it struggles to adapt to the new input characteristics. Addressing this issue may involve different normalization techniques to better align the training data distribution with the model's expectations.
-% Results: The comparison shows that the training data distribution of the normalized DEMs is indeed different from the original training data distribution of the pretrained model, while the models distribution of generated samples shows a distribution around 0.5 the training datas distribution centers on 0.0 for RGB samples. For DEM samples the center of the distribution is more similar with 0.4 for training data and 0.5 for generated samples, but the training data distribution is much more spread out across the whole range from 0 to 1, while the generated samples show a much narrower distribution around the center. This suggests that the model is struggling to learn the new data distribution, which may be contributing to the flattening of the outputs.
 
 One potential explanation for the observed flattening of the generated landscapes at higher control weights is a mismatch in the training data distribution compared to the original training data of the pretrained model. For this training run the DEMs used for training were normalized to a [-1, 1] range based on local maxima, while the pretrained model may have been trained on a different range. This discrepancy in data distribution can lead to difficulties in learning, as the model may struggle to adapt to the new input characteristics. To investigate this hypothesis, a comparison of the training data distribution and the distribution of samples generated by the model was conducted. The results indicate that the training data distribution of the normalized DEMs is indeed different from the original training data distribution of the pretrained model. The generated samples show a distribution around 0.5, while the training data distribution centers around 0.0 for RGB samples. For DEM samples, the center of the distribution is more similar, with 0.4 for training data and 0.5 for generated samples; however, the training data distribution is much more spread out across the whole range from 0 to 1, while the generated samples show a much narrower distribution around the center. This suggests that the model is struggling to learn the new data distribution, which may be contributing to the flattening of the outputs.
 
