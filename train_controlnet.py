@@ -1,4 +1,5 @@
 import functools
+import gc
 import logging
 import os
 import shutil
@@ -31,6 +32,30 @@ from train_utils import (
 )
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+def get_memory_usage() -> float:
+    try:
+        import psutil
+
+        mem = psutil.virtual_memory()
+        return mem.used / mem.total
+    except ImportError:
+        return -1
+
+
+def log_memory_usage(prefix: str = "") -> None:
+    try:
+        import psutil
+
+        mem = psutil.virtual_memory()
+        logging.warning(
+            f"{prefix} RAM: {mem.used / (1024**3):.1f}/{mem.total / (1024**3):.1f} GB "
+            f"({mem.percent:.0f}% used)"
+        )
+    except ImportError:
+        pass
+
 
 dataset_path = "bldng/atlas2"
 mesa_path = "NewtNewt/MESA"
@@ -370,6 +395,7 @@ def main():
         if tracker:
             config_dict = {
                 "mesa_path": mesa_path,
+                "dataset_path": dataset_path,
                 "gradient_checkpointing": gradient_checkpointing,
                 "tf32": tf32,
                 "learning_rate": learning_rate,
@@ -377,25 +403,49 @@ def main():
                 "train_batch_size": train_batch_size,
                 "optimizer": optimizer_type,
                 "lr_warmup_steps": lr_warmup_steps,
+                "num_train_epochs": num_train_epochs,
                 "max_train_steps": max_train_steps,
                 "lr_num_cycles": lr_num_cycles,
                 "lr_power": lr_power,
                 "scheduler_type": scheduler_type,
                 "max_grad_norm": max_grad_norm,
+                "num_workers": num_workers,
                 "set_grads_to_none": set_grads_to_none,
                 "project_dir": project_dir,
                 "logging_dir": logging_dir,
                 "output_dir": output_dir,
                 "checkpointing_steps": checkpointing_steps,
                 "validation_steps": validation_steps,
+                "log_grad_steps": log_grad_steps,
                 "proportion_empty_prompts": proportion_empty_prompts,
+                "streaming": streaming,
                 "mixed_precision": mixed_precision,
                 "seed": seed,
                 "attention_backend": attention_backend,
                 "use_torch_compile": use_torch_compile,
                 "resume_from_checkpoint": resume_from_checkpoint,
                 "conditioning_scale": conditioning_scale,
+                "conditioning_channels": conditioning_channels,
+                "lower_bound_dem": lower_bound_dem,
+                "upper_bound_dem": upper_bound_dem,
+                "lower_bound_img": lower_bound_img,
+                "upper_bound_img": upper_bound_img,
+                "feature": feature,
+                "regenerate_feature_map": regenerate_feature_map,
+                "augment": augment,
+                "enable_random_crop": enable_random_crop,
+                "crop_scale": crop_scale,
+                "enable_random_flip": enable_random_flip,
+                "flip_horizontal_prob": flip_horizontal_prob,
+                "flip_vertical_prob": flip_vertical_prob,
+                "enable_channel_drop": enable_channel_drop,
+                "channel_drop_prob": channel_drop_prob,
+                "enable_feature_dropout": enable_feature_dropout,
+                "feature_dropout_prob": feature_dropout_prob,
+                "snr_gamma": snr_gamma,
+                "checkpoints_to_keep": checkpoints_to_keep,
                 "num_validation_images": num_validation_images,
+                "run_name": run_name,
                 "commit": get_commit(),
             }
             config_str = "\n".join([f"{k}: {v}" for k, v in config_dict.items()])
@@ -638,6 +688,11 @@ def main():
                         )
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=set_grads_to_none)
+
+                del loss, latents, diag
+                if accelerator.sync_gradients:
+                    del batch
+
                 if accelerator.sync_gradients:
                     lr_scheduler.step()
                     progress_bar.update(1)
@@ -708,19 +763,23 @@ def main():
                             if t_avg_loss_count > 0
                             else float("nan")
                         )
+                        logs["memory/usage"] = get_memory_usage()
                         t_bucket_losses.clear()
                         t_avg_loss_sum = 0.0
                         t_avg_loss_count = 0
                         _diag_accum_n = 0
+
                     if global_step % 500 == 0:
-                        del loss, batch, latents
+                        gc.collect()
                         torch.cuda.empty_cache()
+                        log_memory_usage(f"Step {global_step}: ")
                         logs["memory"] = torch.cuda.memory_summary()
                     accelerator.log(logs, step=global_step)
 
                     should_stop = global_step >= max_train_steps
                     if accelerator.is_main_process:
                         if global_step % validation_steps == 0:
+                            log_memory_usage("Pre-validation: ")
                             log_validation_controlnet(
                                 unet,
                                 controlnet,
