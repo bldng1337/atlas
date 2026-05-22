@@ -1,13 +1,15 @@
 \chapter{Methodology}
 \label{cha:methodology}
 
+This chapter details the methodology employed to integrate ControlNet into the MESA model for steerable terrain generation. The process encompasses problem definition, dataset construction, preprocessing, terrain feature extraction, model architecture design, training strategy, loss function formulation, validation and logging procedures, and implementation specifics. Each section provides a comprehensive overview of the steps taken to achieve the research objectives, along with the rationale behind key decisions and techniques used throughout the project.
+
 \section{Problem Definition}
 \label{sec:problem_definition}
 % Define the terrain generation / conditioning task.
 % Specify inputs: imagery, DEM, cloud masks, prompts, terrain feature maps.
-% Specify the model output and the overall training objective.
+% Specify the model output.
 
-
+The primary objective of this thesis is to enhance the controllability of diffusion-based terrain generation by integrating the ControlNet architecture into the MESA model. The task involves training a model to generate realistic heightmaps conditioned on specific terrain features extracted from digital elevation models. The inputs to the model include Sentinel-2 satellite imagery, DEM tiles, cloud masks, text prompts, and algorithmically extracted terrain feature maps. The model is trained to produce heightmaps that not only align with the provided text prompts but also adhere to the spatial structure defined by the terrain feature maps.
 
 \section{Dataset Construction}
 \label{sec:dataset_construction}
@@ -128,7 +130,7 @@ Validation and logging are essential components of the training process to monit
 \label{subsec:validation_sampling}
 % Construct fixed validation inputs from the training stream or a held-out set.
 
-To monitor training progress and evaluate model performance, a fixed set of validation samples is selected from the training distribution. These samples are used to generate outputs at regular intervals during training, allowing for qualitative inspection of the generated terrain features. Quantitative metrics such as mean Intersection over Union (mIoU) between predicted and reference feature maps are also tracked to provide a more objective measure of performance.
+To monitor training progress and evaluate model performance, a fixed set of validation samples is selected from the training distribution. These samples are used to generate outputs at regular intervals during training, allowing for qualitative inspection of the generated terrain features. Quantitative metrics such as mean Intersection over Union between predicted and reference feature maps are also tracked to provide a more objective measure of performance.
 
 \subsection{Training Diagnostics}
 \label{subsec:training_diagnostics}

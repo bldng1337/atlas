@@ -1,6 +1,7 @@
 \chapter{Theoretical Background}
 \label{cha:Theoretical}
 
+This chapter provides an overview of the theoretical background relevant to steerable terrain generation using diffusion models. It covers the types of remote sensing data used for terrain modeling, key terrain features, the fundamentals of diffusion models, control methods for conditioning diffusion models, training objectives and optimization techniques, and evaluation metrics for assessing model performance.
 
 \section{Remote Sensing Data for Terrain Modeling}
 \label{subsec:remote_sensing_data}
@@ -132,7 +133,7 @@ SNR Weighted Loss is a training objective for diffusion models that weights the 
 \section{Evaluation Metrics}
 \label{subsec:evaluation_metrics}
 
-\subsection{Mean Intersection over Union (mIoU)}
+\subsection{Mean Intersection over Union}
 \label{subsec:miou}
 
 Mean Intersection over Union (mIoU) is a common evaluation metric used in image segmentation tasks to measure the overlap between predicted segmentation masks and ground truth masks. It is calculated as the average of the Intersection over Union (IoU) across all classes, where IoU is defined as the ratio of the area of overlap between the predicted and ground truth masks to the area of their union. mIoU provides a comprehensive measure of segmentation accuracy, accounting for both false positives and false negatives, making it a standard metric for evaluating segmentation performance \cite{long2015fully}.
