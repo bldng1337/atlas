@@ -96,21 +96,21 @@ Controlling diffusion models is crucial for applications requiring precise featu
 \subsection{ControlNet}
 \label{subsec:controlnet}
 
-ControlNet adds additional control modalities to pretrained diffusion models by creating a trainable copy of the models encoder layers. This copy is connected to the original network via zero-initialized convolutional layers allowing it to learn condition-specific features while preserving the weights of the pretrained model. During training the original diffusion model remains frozen and only the ControlNet layers are updated. This approach enables strong conditioning control while preserving the capabilities of the original model albeit with computational overhead due to the network duplication~\cite{zhang2023controlnet}.
+ControlNet adds additional control modalities to pretrained diffusion models by creating a trainable copy of the model's encoder layers. This copy is connected to the original network via zero-initialized convolutional layers allowing it to learn condition-specific features while preserving the weights of the pretrained model. During training, the original diffusion model remains frozen and only the ControlNet layers are updated. This approach enables strong conditioning control while preserving the capabilities of the original model albeit with computational overhead due to the network duplication~\cite{zhang2023controlnet}.
 
 %TODO: <IMG> A diagram illustrating the ControlNet architecture, showing the original diffusion model and the additional control layers.
 
 \subsection{T2I Adapter}
 \label{subsec:t2i_adapter}
 
-T2I-Adapter proposes a lightweight alternative to ControlNet by introducing small adapters that can be integrated into pretrained diffusion models. Instead of duplicating the entire network T2I-Adapter uses adapters that extract features from the control conditions and progressively integrate them into the diffusion process. This design significantly reduces the number of additional parameters and computational requirements compared to ControlNet while still providing effective conditioning capabilities~\cite{mou2023t2i}.
+T2I-Adapter proposes a lightweight alternative to ControlNet by introducing small adapters that can be integrated into pretrained diffusion models. Instead of duplicating the entire network, T2I-Adapter uses adapters that extract features from the control conditions and progressively integrate them into the diffusion process. This design significantly reduces the number of additional parameters and computational requirements compared to ControlNet while still providing effective conditioning capabilities~\cite{mou2023t2i}.
 
 %TODO: <IMG> A diagram illustrating the T2I-Adapter architecture, showing the original diffusion model and the adapter layers.
 
 \subsection{Comparison of Control Architectures}
 \label{subsec:comp_control}
 
-ControlNet and T2I-Adapter represent two distinct approaches to adding spatial control to pretrained diffusion models. ControlNet involves duplicating the entire encoder network resulting in significant computational overhead during training. In contrast, T2I-Adapter employs an lightweight adapter that introduce far fewer parameters making it more efficient in terms of training time and resource usage. Both methods have demonstrated strong conditioning capabilities but they differ in terms of control fidelity, generation quality and integration complexity.
+ControlNet and T2I-Adapter represent two distinct approaches to adding spatial control to pretrained diffusion models. ControlNet involves duplicating the entire encoder network resulting in significant computational overhead during training. In contrast, T2I-Adapter employs an lightweight adapter that introduces far fewer parameters making it more efficient in terms of training time and resource usage. Both methods have demonstrated strong conditioning capabilities, but they differ in terms of control fidelity, generation quality and integration complexity.
 
 \section{Training Objectives and Optimization}
 \label{subsec:training_objectives_optimization}
@@ -123,7 +123,7 @@ AdamW is an optimization algorithm that combines the benefits of the Adam optimi
 \subsection{Prodigy Optimizer}
 \label{subsec:prodigy_optimizer}
 
-Prodigy is a optimization algorithm designed for training large-scale deep learning models. Introduced by Mishchenko and Defazio~\cite{mishchenko2023prodigy}, Prodigy combines the advantages of adaptive gradient methods with momentum-based optimization to achieve faster convergence and improved performance. Prodigy incorporates a dynamic learning rate schedule and adaptive momentum to effectively navigate the loss landscape, making it particularly well-suited for training complex models such as diffusion models without having to tune or sweep the learning rate.
+Prodigy is an optimization algorithm designed for training large-scale deep learning models. Introduced by Mishchenko and Defazio~\cite{mishchenko2023prodigy}, Prodigy combines the advantages of adaptive gradient methods with momentum-based optimization to achieve faster convergence and improved performance. Prodigy incorporates a dynamic learning rate schedule and adaptive momentum to effectively navigate the loss landscape, making it particularly well-suited for training complex models such as diffusion models without having to tune or sweep the learning rate.
 
 \section{SNR Weighted Loss}
 \label{sec:snr_weighted_loss}
