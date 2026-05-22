@@ -10,30 +10,22 @@ Remote sensing data provides critical information about Earth's surface, enablin
 \subsection{Sentinel-2 Optical Imagery}
 \label{subsec:sentinel2_optical_imagery}
 
-Sentinel-2 is a key satellite mission operated by the European Space Agency (ESA) that delivers high-resolution multispectral optical imagery across 13 spectral bands in the visible to shortwave infrared range. With spatial resolutions up to 10 meters and a revisit period of 5 days, Sentinel-2 has become a core source of surface reflectance data for land cover monitoring. Its bands are distributed across three resolution tiers — 4 bands at 10 m (blue, green, red, NIR), 6 bands at 20 m, and 3 bands at 60 m — making it highly flexible as a source of surface appearance for terrain generation tasks. It is organized into a fixed tiling grid, where each tile covers a 100 by 100 km area~\cite{drusch2012sentinel2, falkner2025sentinel2tiling}.
+Sentinel-2 is a key satellite mission operated by the European Space Agency that delivers high resolution multispectral optical imagery across 13 spectral bands in the visible to shortwave infrared range. With spatial resolutions up to 10 meters and a revisit period of 5 days, Sentinel-2 has become a core source of surface reflectance data for land cover monitoring. Its bands are distributed across three resolution tiers: 4 bands at 10 m (blue, green, red, NIR), 6 bands at 20 m, and 3 bands at 60 m, making it highly flexible as a source of surface appearance for terrain generation tasks. It is organized into a fixed tiling grid, where each tile covers a 100 by 100 km area~\cite{drusch2012sentinel2, falkner2025sentinel2tiling}.
 
 \subsection{Digital Elevation Models}
 \label{subsec:digital_elevation_models}
 
 DEMs are raster-based representations of terrain elevation, structured as a continuous grid of elevation values. DEMs are derived from various sources, including satellite radar, LiDAR, and photogrammetry. They provide critical information about terrain structure, enabling the extraction of geomorphological features such as slope, aspect, curvature, ridges, valleys, and cliffs~\cite{pike2008guide}.
 
-\section{Terrain Representation}
-\label{sec:terrain_representation}
-
-\subsection{Features of Terrain}
-\label{subsec:terrain_features}
+\section{Features of Terrain}
+\label{sec:terrain_features}
 
 There are several key features of terrain that are commonly extracted from DEMs and used in terrain analysis and modeling. These include slope which measures the steepness of the terrain, ridges which are linear high points that divide drainage basins, valleys which are linear low points that concentrate water flow, cliffs or escarpments which are regions of abrupt elevation change, and flats or plateaus which are low-curvature areas at elevated positions~\cite{pike2008guide, hengl2008geomorphometry}.
-
-\subsection{Feature Extraction from DEMs}
-\label{subsec:feature_extraction_from_dems}
-
-To extract terrain features from DEMs, there are several methods that can be used. Ridges can be extracted using digital drainage analysis, while valleys can be identified by inverting the DEM and applying drainage extraction algorithms. Cliffs or escarpments can be detected by identifying regions of high slope magnitude~\cite{pike2008guide, dragut2006landform, jordan2005morphotectonic, weiss2001tpi}.
 
 \section{Diffusion Models}
 \label{subsec:diffusion_models}
 
-Diffusion models generate data by reversing a gradual noising process learning to denoise samples step by step. Introduced by Sohl-Dickstein et al. \cite{sohl2015deep} and popularized by Ho et al. \cite{ho2020ddpm} diffusion models have emerged as powerful generative models capable of producing high-quality images and other data modalities.
+Diffusion models generate data by reversing a gradual noising process learning to denoise samples step by step. Introduced by Sohl-Dickstein et al. \cite{sohl2015deep} and popularized by Ho et al. \cite{ho2020ddpm}, diffusion models have emerged as powerful generative models capable of producing high-quality images and other data modalities.
 
 \subsection{Diffusion Process}
 \label{subsec:diffusion_process}
@@ -56,7 +48,7 @@ with $\bar{\alpha}_t = \prod_{s=1}^t (1 - \beta_s)$ \cite{ho2020ddpm}.
 \subsubsection{Reverse Diffusion Process}
 \label{subsubsec:reverse_diffusion_process}
 
-Diffusion models work by by learning the reverse process. The model denoises a sample starting from pure noise $\mathbf{x}_T$ to recover a realistic data point.
+Diffusion models work by learning the reverse process. The model denoises a sample starting from pure noise $\mathbf{x}_T$ to recover a realistic data point.
 This reverse process is also modeled as a Markov chain:
 \[
 	p_\theta(\mathbf{x}_{t-1} | \mathbf{x}_t) = \mathcal{N}(\mathbf{x}_{t-1}; \boldsymbol{\mu}_\theta(\mathbf{x}_t, t), \Sigma_\theta(\mathbf{x}_t, t))
@@ -82,34 +74,42 @@ Subsequent work has introduced improvements to the basic diffusion process such 
 
 U-Net is a convolutional neural network architecture widely used as the backbone for diffusion models due to its ability to capture multi-scale features through an encoder-decoder structure with skip connections. Originally proposed by Ronneberger et al. \cite{ronneberger2015unet} for biomedical image segmentation, U-Net has been adapted for diffusion models by Ho et al. \cite{ho2020ddpm}.
 
-The U-Net architecture consists of an encoder and an decoder. The encoder progressively reduces the spatial dimensions of the input while increasing the number of feature channels capturing high-level semantic information. The decoder then upsamples the feature maps back to the original resolution to reconstruct the output. Skip connections between corresponding layers in the encoder and decoder allow the model to retain information.
+The U-Net architecture consists of an encoder and a decoder. The encoder progressively reduces the spatial dimensions of the input while increasing the number of feature channels capturing high-level semantic information. The decoder then upsamples the feature maps back to the original resolution to reconstruct the output. Skip connections between corresponding layers in the encoder and decoder allow the model to retain information.
 
 In diffusion models, the U-Net takes the noisy sample $\mathbf{x}_t$ and the timestep $t$ as input. The network predicts either the noise component or the denoised sample at each step of the reverse diffusion process.
+
+%TODO: <IMG> A diagram of the U-Net architecture used in diffusion models, showing the encoder, decoder, and skip connections.
 
 \subsubsection{Latent Diffusion}
 \label{subsubsec:latent_diffusion}
 
-Latent Diffusion Models are an efficient variant of diffusion models that first compress the image into a lower-dimensional latent space before performing the diffusion process. Introduced by Rombach et al. \cite{rombach2022stable}, Latent Diffusion Models leverage a pre-trained autoencoder, typically a Variational Autoencoder \cite{kingma2014auto}, to encode the images into a latent representation. The autoencoder consists of an encoder that maps the input image to a latent vector and a decoder that reconstructs the image from the latent vector. The diffusion model is trained to denoise latent vectors instead of images allowing for faster training and inference.
+Latent Diffusion Models are an efficient variant of diffusion models that first compress the image into a lower-dimensional latent space before performing the diffusion process. Introduced by Rombach et al. \cite{rombach2022stable}, Latent Diffusion Models leverage a pretrained autoencoder, typically a Variational Autoencoder \cite{kingma2014auto}, to encode the images into a latent representation. The autoencoder consists of an encoder that maps the input image to a latent vector and a decoder that reconstructs the image from the latent vector. The diffusion model is trained to denoise latent vectors instead of images allowing for faster training and inference.
+
+%TODO: <IMG> A diagram illustrating the architecture of a Latent Diffusion Model, showing the autoencoder and the diffusion process in the latent space.
 
 \section{Control Methods for Diffusion Models}
 \label{sec:control_methods}
 
-Controlling diffusion models is crucial for applications requiring precise feature placement such as terrain generation. Although existing diffusion models already support conditioning methods via cross attention layers these need to be incorporated during the initial training of the diffusion model. To enable conditioning on additional modalities without having to retrain the entire model, which is computationally expensive, ControlNet \cite{zhang2023controlnet} and T2I-Adapter \cite{mou2023t2i} have been proposed. Both methods allow for conditioning on various input modalities while preserving the capabilities of pre-trained diffusion models.
+Controlling diffusion models is crucial for applications requiring precise feature placement, such as terrain generation. Although existing diffusion models already support conditioning methods via cross attention layers these need to be incorporated during the initial training of the diffusion model. To enable conditioning on additional modalities without having to retrain the entire model, which is computationally expensive, ControlNet \cite{zhang2023controlnet} and T2I-Adapter \cite{mou2023t2i} have been proposed. Both methods allow for conditioning on various input modalities while preserving the capabilities of pretrained diffusion models.
 
 \subsection{ControlNet}
 \label{subsec:controlnet}
 
-ControlNet adds additional control modalities to pretrained diffusion models by creating a trainable copy of the models encoder layers. This copy is connected to the original network via zero-initialized convolutional layers allowing it to learn condition specific features while preserving the weights of the pre-trained model. During training the original diffusion model remains frozen and only the ControlNet layers are updated. This approach enables strong conditioning control while preserving the capabilities of the original model albeit with computational overhead due to the network duplication \cite{zhang2023controlnet}.
+ControlNet adds additional control modalities to pretrained diffusion models by creating a trainable copy of the models encoder layers. This copy is connected to the original network via zero-initialized convolutional layers allowing it to learn condition-specific features while preserving the weights of the pretrained model. During training the original diffusion model remains frozen and only the ControlNet layers are updated. This approach enables strong conditioning control while preserving the capabilities of the original model albeit with computational overhead due to the network duplication \cite{zhang2023controlnet}.
+
+%TODO: <IMG> A diagram illustrating the ControlNet architecture, showing the original diffusion model and the additional control layers.
 
 \subsection{T2I Adapter}
 \label{subsec:t2i_adapter}
 
-T2I-Adapter proposes a lightweight alternative to ControlNet by introducing small adapter that can be integrated into pre-trained diffusion models. Instead of duplicating the entire network T2I-Adapter uses adapters that extract features from the control conditions and progressively integrate them into the diffusion process. This design significantly reduces the number of additional parameters and computational requirements compared to ControlNet while still providing effective conditioning capabilities \cite{mou2023t2i}.
+T2I-Adapter proposes a lightweight alternative to ControlNet by introducing small adapters that can be integrated into pretrained diffusion models. Instead of duplicating the entire network T2I-Adapter uses adapters that extract features from the control conditions and progressively integrate them into the diffusion process. This design significantly reduces the number of additional parameters and computational requirements compared to ControlNet while still providing effective conditioning capabilities \cite{mou2023t2i}.
+
+%TODO: <IMG> A diagram illustrating the T2I-Adapter architecture, showing the original diffusion model and the adapter layers.
 
 \subsection{Comparison of Control Architectures}
 \label{subsec:comp_control}
 
-ControlNet and T2I-Adapter represent two distinct approaches to adding spatial control to pre-trained diffusion models. ControlNet involves duplicating the entire encoder network resulting in significant computational overhead during training. In contrast, T2I-Adapter employs an lightweight adapter that introduce far fewer parameters making it more efficient in terms of training time and resource usage. Both methods have demonstrated strong conditioning capabilities but they differ in terms of control fidelity, generation quality and integration complexity.
+ControlNet and T2I-Adapter represent two distinct approaches to adding spatial control to pretrained diffusion models. ControlNet involves duplicating the entire encoder network resulting in significant computational overhead during training. In contrast, T2I-Adapter employs an lightweight adapter that introduce far fewer parameters making it more efficient in terms of training time and resource usage. Both methods have demonstrated strong conditioning capabilities but they differ in terms of control fidelity, generation quality and integration complexity.
 
 \section{Training Objectives and Optimization}
 \label{subsec:training_objectives_optimization}

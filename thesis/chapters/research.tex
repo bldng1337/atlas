@@ -9,7 +9,7 @@ The generation of landscapes without geological data as a direct basis falls, ac
 \subsection{Fractal Generation}
 \label{subsec:fractal_generation}
 
-Fractal landscape generation uses procedural algorithms to replicate the appearance of realistic landscapes. These methods are grounded in the observation that many natural terrains exhibit fractal properties, such as self similarity and statistical roughness across scales. When a portion of a self similar object is examined under increasing magnification, the same level of detail and irregularity appears regardless of scale. \cite{fournier1982computer}
+Fractal landscape generation uses procedural algorithms to replicate the appearance of realistic landscapes. These methods are grounded in the observation that many natural terrains exhibit fractal properties, such as self-similarity and statistical roughness across scales. When a portion of a self similar object is examined under increasing magnification, the same level of detail and irregularity appears regardless of scale. \cite{fournier1982computer}
 
 \subsubsection{Fractal Brownian Motion - fBm}
 
@@ -21,7 +21,7 @@ Recent research also explores hybrid approaches combining fBm with neural networ
 
 \subsubsection{Perlin Noise and Gradient-Based Methods}
 
-Perlin noise is a gradient-based coherent noise function introduced by K. Perlin \cite{perlin1985noise} to generate natural looking textures and terrains. Unlike purely random noise, Perlin noise produces smooth, continuous values by interpolating between gradients assigned to points on a grid. This results in a noise field where nearby points have similar values.
+Perlin noise is a gradient-based coherent noise function introduced by K. Perlin \cite{perlin1985noise} to generate natural-looking textures and terrains. Unlike purely random noise, Perlin noise produces smooth, continuous values by interpolating between gradients assigned to points on a grid. This results in a noise field where nearby points have similar values.
 
 Perlin noise is widely used in computer graphics for heightmap generation due to its computational efficiency and controllable parameters.
 
@@ -46,10 +46,10 @@ Particle based hydraulic erosion methods, as introduced by Chiba et al. \cite{ch
 
 Thermal Erosion models gradual breakdown and redistribution of terrain material. The initial model, introduced by Musgrave et al. \cite{musgrave1989synthesis} operates by comparing the altitude difference of each vertex with its neighboring vertices. If the slope is too steep a fixed percentage gets transferred to the neighbor.
 
-\subsection{Sketch Based Surface Creation}
+\subsection{Sketch-based Surface Creation}
 \label{subsec:sketch_based_surface_creation}
 
-Sketch based surface creation allows users to intuitively design terrain features through direct manipulation or drawing. This approach emphasizes user control and creativity enabling the rapid prototyping of landscapes. Users can sketch contours, elevation profiles, or specific features like mountains and valleys which are then interpreted by the system to generate a corresponding 3D terrain model. Various algorithms can be employed to convert these sketches into heightmaps or mesh representations often incorporating interpolation, smoothing, and procedural refinement to enhance realism \cite{Gain2009}.
+Sketch-based surface creation allows users to intuitively design terrain features through direct manipulation or drawing. This approach emphasizes user control and creativity enabling the rapid prototyping of landscapes. Users can sketch contours, elevation profiles, or specific features like mountains and valleys which are then interpreted by the system to generate a corresponding 3D terrain model. Various algorithms can be employed to convert these sketches into heightmaps or mesh representations often incorporating interpolation, smoothing, and procedural refinement to enhance realism \cite{Gain2009}.
 
 \subsection{Terrain Synthesis}
 \label{subsec:terrain_synthesis}

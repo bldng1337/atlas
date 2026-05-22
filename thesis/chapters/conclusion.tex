@@ -1,0 +1,34 @@
+\chapter{Conclusion}
+\label{cha:conclusion}
+
+\section{Summary}
+\label{sec:summary}
+% Recap main objective
+% Summarize methodology
+% talk about achievement
+
+This thesis set out to bridge the gap between text-driven terrain generation and precise spatial control by integrating a ControlNet architecture into the MESA latent diffusion model. While text prompts offer high-level semantic control, they lack the geographic precision required for rigorous data-free geomodelling. To address this, specific geomorphological features from the DEM samples within the MajorTOM dataset were extracted. These feature maps were then used as conditioning hints. The implementation of a custom training pipeline, successfully demonstrated that the duplicated encoder blocks of the ControlNet could effectively guide the generation process. The experiments confirmed that as the control weight increases, the spatial structure of the generated landscapes progressively conforms to the provided feature maps, successfully establishing a framework for steerable terrain synthesis.
+
+\section{Limitations}
+\label{sec:limitations}
+% Trade-off between steerability and visual quality.
+% Data distribution mismatch (local 0-1 normalization vs. original base model distribution).
+% Feature imbalance: Valleys align well, but cliffs show near-zero IoU alignment.
+% Training instability: Volatility in mIoU after the initial breakthrough and noisy loss metrics.
+
+Despite the successful integration of spatial conditioning, several limitations were identified during the evaluation. The most prominent issue is the inverse relationship between spatial adherence and visual quality. At higher control weights the generated terrains suffer from a severe flattening effect, losing fine-scale detail and dynamic range. Analysis revealed this is likely caused by a mismatch in data normalization. The local [-1, 1] normalization applied to the training data clashed with the distribution the pretrained base model was originally exposed to. Furthermore, the model exhibited varying degrees of success depending on the terrain feature. While valleys achieved moderate alignment, the model almost entirely failed to replicate cliffs. Finally, the training process exhibited instability. After an initial convergence breakthrough around 10\,000 steps, the validation metrics fluctuated randomly, indicating that the model struggled to consistently generalize the learned conditioning across different geographical samples.
+
+\section{Future Work}
+\label{sec:future_work}
+% Address the normalization mismatch to fix the flattening issue.
+% Explore lightweight architectures like T2I-Adapter to reduce compute overhead.
+% Improve the cliff extraction algorithm and implement feature-specific loss weighting.
+% Scale up training: More steps, larger dataset, and dynamic control weighting during inference.
+
+The limitations encountered present avenues for future research. The priority is to resolve the data distribution mismatch by aligning the DEM normalization strategy with the original data distribution of the base model which should mitigate the flattening effect and restore the visual fidelity of conditioned generations. Additionally the disparity in feature alignment suggests, that the cliff extraction pipeline requires refinement.
+
+%Closing
+\section{Closing Remarks}
+\label{sec:closing_remarks}
+
+Overall, this thesis demonstrates the feasibility of integrating ControlNet into MESA for steerable terrain generation, while also highlighting key challenges and areas for improvement. By addressing these limitations future work can further enhance the controllability and realism of diffusion-based terrain synthesis, paving the way for more powerful tools in data-free geomodelling and creative landscape design.
