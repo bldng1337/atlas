@@ -126,7 +126,7 @@ AdamW is an optimization algorithm that combines the benefits of the Adam optimi
 Prodigy is a optimization algorithm designed for training large-scale deep learning models. Introduced by Mishchenko and Defazio~\cite{mishchenko2023prodigy}, Prodigy combines the advantages of adaptive gradient methods with momentum-based optimization to achieve faster convergence and improved performance. Prodigy incorporates a dynamic learning rate schedule and adaptive momentum to effectively navigate the loss landscape, making it particularly well-suited for training complex models such as diffusion models without having to tune or sweep the learning rate.
 
 \section{SNR Weighted Loss}
-\label{subsec:snr_weighted_loss}
+\label{sec:snr_weighted_loss}
 
 SNR Weighted Loss is a training objective for diffusion models that weights the loss based on the signal-to-noise ratio (SNR) of the noisy samples at each timestep. Introduced by Hang et al.~\cite{hang2024efficientdiffusiontrainingminsnr}, this approach addresses the issue of imbalanced training across different noise levels by giving more emphasis to samples with higher SNR, which are typically more informative for learning.
 
