@@ -410,11 +410,24 @@ def main():
     val_iter = iter(train_dataloader)
     _val_features = []
     _val_prompts = []
+    _val_oserror_retries = 3
     while len(_val_prompts) < num_validation_images:
         try:
             _vbatch = next(val_iter)
         except StopIteration:
             break
+        except OSError as e:
+            _val_oserror_retries -= 1
+            if _val_oserror_retries > 0:
+                logger.warning(
+                    f"OSError collecting validation batch (retries left: {_val_oserror_retries}): {e}"
+                )
+                continue
+            else:
+                logger.error(
+                    f"OSError collecting validation batch, no retries left: {e}. Skipping."
+                )
+                break
         if feature == "canny":
             _vbatch = use_canny_feature(_vbatch)
         _val_features.append(_vbatch["feature_map"])
@@ -472,8 +485,36 @@ def main():
         desc="Steps",
         disable=not accelerator.is_local_main_process,
     )
+    dataloader_oserror_retries = 3
+
+    def iter_with_retry(dataloader):
+        """Iterate the dataloader, retrying on OSError (e.g. corrupt downloads)."""
+        it = iter(dataloader)
+        while True:
+            batch = None
+            for attempt in range(dataloader_oserror_retries):
+                try:
+                    batch = next(it)
+                    break
+                except StopIteration:
+                    return
+                except OSError as e:
+                    if attempt < dataloader_oserror_retries - 1:
+                        logger.warning(
+                            f"OSError in DataLoader (attempt {attempt + 1}/{dataloader_oserror_retries}): {e}. Retrying..."
+                        )
+                        continue
+                    else:
+                        logger.error(
+                            f"OSError in DataLoader after {dataloader_oserror_retries} attempts: {e}. Skipping batch."
+                        )
+                        it = iter(dataloader)
+                        return
+            if batch is not None:
+                yield batch
+
     for epoch in range(first_epoch, num_train_epochs):
-        for step, batch in enumerate(train_dataloader):
+        for step, batch in enumerate(iter_with_retry(train_dataloader)):
             if augment:
                 batch = augment_batch(
                     batch=batch,
