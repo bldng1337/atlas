@@ -195,7 +195,7 @@ def preprocess(
         else:
             txts.append(
                 tokenizer(
-                    data["prompt"],
+                    "A Sentinel-2 image of " + data["prompt"],
                     padding="max_length",
                     max_length=tokenizer.model_max_length,
                     truncation=True,
