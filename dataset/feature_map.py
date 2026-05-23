@@ -6,7 +6,7 @@ import richdem as rd
 from scipy.ndimage import gaussian_filter
 from skimage.feature import canny
 from skimage.measure import label, regionprops
-from skimage.morphology import dilation, disk, remove_small_objects, square
+from skimage.morphology import dilation, disk, remove_small_objects, skeletonize, square
 
 
 def compute_slope(dem_norm: np.ndarray) -> np.ndarray:
@@ -74,7 +74,7 @@ def dropout(
 def extract_terrain_features(
     dem: np.ndarray,
     gaussian_sigma: float = 1.5,
-    flow_acc_percentile: float = 99.0,
+    flow_acc_percentile: float = 98.0,
     n_strahler_orders: int = 6,
     canny_sigma: float = 1.5,
     canny_low_threshold: float = 0.05,
@@ -89,8 +89,8 @@ def extract_terrain_features(
 ) -> Tuple[np.ndarray, np.ndarray]:
     dem = dem.astype(np.float64)
     dem_blur = gaussian_filter(dem, sigma=gaussian_sigma)
-    lo, hi = dem_blur.min(), dem_blur.max()
-    dem_norm = (dem_blur - lo) / (hi - lo + 1e-9)
+    lo, hi = dem.min(), dem.max()
+    dem_norm = (dem - lo) / (hi - lo + 1e-9)
     slope = compute_slope(dem_norm)
 
     flat_thresh = np.percentile(slope, flat_slope_percentile)
@@ -119,9 +119,8 @@ def extract_terrain_features(
     steep_thresh = np.percentile(slope, cliff_slope_percentile)
     steep_mask = dilation(slope > steep_thresh, disk(2))
     cliff_mask = edges & steep_mask
-
     cliff_order = np.zeros(dem.shape, dtype=np.uint8)
-    for rank, pct in enumerate([50, 65, 75, 85, 95], start=1):
+    for rank, pct in enumerate([50, 60, 65, 70, 75, 80, 85, 90, 95], start=1):
         cliff_order[cliff_mask & (slope >= np.percentile(slope, pct))] = rank
 
     for ch, order in (
@@ -133,7 +132,7 @@ def extract_terrain_features(
             ch *= dropout(
                 ch,
                 order,
-                min_size=min_feature_size,
+                min_size=0,
                 min_dropout=min_dropout_rate,
                 max_dropout=max_dropout_rate,
             )
@@ -173,11 +172,11 @@ def get_map_combined(
     canny_high_threshold = random.uniform(0.12, 0.18)
     cliff_slope_percentile = random.uniform(70.0, 80.0)
     flat_slope_percentile = random.uniform(15.0, 25.0)
-    thickness = 2#random.randint(3, 6)
-    min_feature_size = 60#random.randint(60, 120)
-    line_sigma = 0.15#random.uniform(0.15, 0.3)
-    min_dropout_rate = 0.15#random.uniform(0.15, 0.25)
-    max_dropout_rate = 0.35#random.uniform(0.7, 0.9)
+    thickness = 2  # random.randint(3, 6)
+    min_feature_size = 60  # random.randint(60, 120)
+    line_sigma = 0.15  # random.uniform(0.15, 0.3)
+    min_dropout_rate = 0.15  # random.uniform(0.15, 0.25)
+    max_dropout_rate = 0.35  # random.uniform(0.7, 0.9)
 
     maps, flat = extract_terrain_features(
         dem,

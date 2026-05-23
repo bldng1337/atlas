@@ -32,7 +32,7 @@ The final dataset is stored in a parquet format with columns for the Sentinel-2 
 \section{Preprocessing Pipeline}
 \label{sec:preprocessing_pipeline}
 
-The preprocessing pipeline takes raw bytes from the dataset and converts them into tensors suitable for model input. Sentinel-2 imagery is decoded from the RGB bands resized to 768x768 via linear interpolation and normalized to the [-1,1] range. DEM tiles are decoded and normalized by dividing by the local maximum elevation to ensure values are in a consistent range. They are then resized to 768x768 and normalized to the [-1,1] range. Cloud masks are decoded and resized to 768x768 via nearest-neighbor interpolation, resulting in binary tensors where 1 indicates cloud cover and 0 indicates clear sky. Text prompts are tokenized using the CLIP tokenizer. For classifier-free guidance, a random subset of prompts is replaced with empty strings during training.
+The preprocessing pipeline takes raw bytes from the dataset and converts them into tensors suitable for model input. Sentinel-2 imagery is decoded from the RGB bands, resized to 768x768 via linear interpolation and normalized to the [-1,1] range. DEM tiles are decoded and normalized by dividing by the local maximum elevation to ensure values are in a consistent range. They are then resized to 768x768 and normalized to the [-1,1] range. Cloud masks are decoded and resized to 768x768 via nearest-neighbor interpolation, resulting in binary tensors where 1 indicates cloud cover and 0 indicates clear sky. Text prompts are tokenized using the CLIP tokenizer. For classifier-free guidance, a random subset of prompts is replaced with empty strings during training.
 
 \section{Terrain Feature Map Generation}
 \label{sec:terrain_feature_map_generation}
@@ -42,12 +42,22 @@ To provide spatial conditioning that captures meaningful terrain structure, feat
 \subsection{DEM-Based Terrain Feature Extraction}
 \label{subsec:dem_based_terrain_feature_extraction}
 
-In order to provide spatial conditioning that captures meaningful terrain structure, feature maps consisting of ridges, valleys and cliffs are extracted from the DEMs. Flow accumulation is used to identify valleys, while the Flow accumulation of the inverted DEM is analyzed to find ridges. Cliffs are detected using edge detection combined with slope thresholds. After extracting these features a dropout is applied based on the strahler number to randomly drop parts of the control signal during training, which encourages the model to learn from partial conditioning and improves robustness.
+In order to provide spatial conditioning that captures meaningful terrain structure, feature maps consisting of ridges, valleys and cliffs are extracted from the DEMs. Flow accumulation is used to identify valleys, while the Flow accumulation of the inverted DEM is analyzed to find ridges. Cliffs are detected using edge detection combined with slope thresholds. After extracting these features, a dropout is applied based on the strahler number to randomly drop parts of the control signal during training, which encourages the model to learn from partial conditioning and improves robustness.
+
+
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[width=\linewidth]{images/feature_map_extraction.png}
+	\caption{Side-by-side comparison of an original DEM and the extracted terrain feature maps. From left to right: the input DEM rendered with a terrain colormap, valleys detected via flow accumulation (red channel), ridges detected via flow accumulation on the inverted DEM (green channel), cliffs detected via edge detection and slope thresholds (blue channel), and the combined three-channel feature map used as conditioning input to the ControlNet.}
+	\label{fig:feature_map_extraction}
+\end{figure}
 
 \section{Model Architecture}
 \label{sec:model_architecture}
 
 For the ControlNet model, the downblocks of the MESA~\cite{borne-pons2025mesa} U-Net are duplicated to create a separate conditioning branch. The ControlNet branch receives the sample with the conditioning feature maps added. To keep training stable the conditioning is put through a zero-initialized convolution. These samples are then passed through the cloned downblocks. The resulting residuals from the ControlNet are put through a zero-initialized convolution and added to the main U-Net residuals at the corresponding layers. The rest of the U-Net architecture remains unchanged, allowing the pretrained weights to be leveraged while still enabling spatial conditioning through the ControlNet branch.
+
+%TODO: <IMG> Diagram of the ControlNet architecture showing the main U-Net and the duplicated downblocks for conditioning, with arrows indicating the flow of data and residual connections.
 
 \section{Training Strategy}
 \label{sec:training_strategy}
@@ -97,4 +107,4 @@ During training, various diagnostics are tracked to monitor the optimization pro
 \section{Implementation Details}
 \label{sec:implementation_details}
 
-There are several key implementation details that are relevant for reproducing the training process. The training is implemented using PyTorch, with the Diffusers library for the diffusion model architecture. The Accelerate library is used to manage distributed training and mixed precision. The Transformers library is used for text tokenization and encoding. Geospatial libraries such as rasterio, pysheds, and richdem are used for processing DEMs and extracting terrain features. The training environment assumes access to GPUs with sufficient memory to handle the model and batch sizes, and the software stack is designed to be compatible with both Linux and Windows platforms.
+There are several key implementation details that are relevant for reproducing the training process. The training is implemented using PyTorch, with the Diffusers library for the diffusion model architecture. The Accelerate library is used to manage distributed training and mixed precision. The Transformers library is used for text tokenization and encoding. Geospatial libraries such as rasterio, pysheds, and richdem are used for processing DEMs and extracting terrain features. The software stack is designed to be compatible with both Linux and Windows platforms.
