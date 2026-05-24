@@ -53,7 +53,13 @@ def dropout(
         dropout_mask = (order == o) & (mask > 0)
         higher_order_mask = (order > o) & (res > 0)
         labeled = label(dropout_mask)
-        for region in regionprops(labeled):
+        regions = regionprops(labeled)
+        if len(regions) > 20:
+            regions = sorted(regions, key=lambda r: r.area, reverse=True)[:20]
+            kept_labels = {r.label for r in regions}
+            skip_mask = (labeled > 0) & ~np.isin(labeled, list(kept_labels))
+            res[skip_mask] = 0
+        for region in regions:
             reg = labeled == region.label
             if region.area < min_size:
                 res[reg] = 0
@@ -132,7 +138,7 @@ def extract_terrain_features(
             ch *= dropout(
                 ch,
                 order,
-                min_size=0,
+                min_size=30,
                 min_dropout=min_dropout_rate,
                 max_dropout=max_dropout_rate,
             )
