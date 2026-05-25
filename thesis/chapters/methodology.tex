@@ -1,7 +1,7 @@
 \chapter{Methodology}
 \label{cha:methodology}
 
-This chapter details the methodology employed to integrate ControlNet into the MESA model for steerable terrain generation. The process encompasses problem definition, dataset construction, preprocessing, terrain feature extraction, model architecture design, training strategy, loss function formulation, validation and logging procedures, and implementation specifics. Each section provides a overview of the steps taken to achieve the research objectives.
+This chapter details the methodology employed to integrate ControlNet into the MESA model for steerable terrain generation. The process encompasses problem definition, dataset construction, preprocessing, terrain feature extraction, model architecture design, training strategy, loss function formulation, validation and logging procedures, and implementation specifics. Each section provides an overview of the steps taken to achieve the research objectives.
 
 \section{Problem Definition}
 \label{sec:problem_definition}
@@ -11,7 +11,7 @@ The primary objective of this thesis is to enhance the controllability of diffus
 \section{Dataset Construction}
 \label{sec:dataset_construction}
 
-MajorTOM~\cite{schulz2024majortom} is used as the primary data source for training. It provides paired Sentinel-2 satellite imagery and digital elevation models across a wide range of geographic locations and conditions. The dataset also includes cloud masks that identify occluded regions. Text prompts are taken from the MESA~\cite{borne-pons2025mesa} base model metadata, which included prompts for each grid cell in the training area. The dataset is filtered to remove invalid and low quality samples.
+MajorTOM~\cite{schulz2024majortom} is used as the primary data source for training. It provides paired Sentinel-2 satellite imagery and digital elevation models across a wide range of geographic locations and conditions. The dataset also includes cloud masks that identify occluded regions. Text prompts are taken from the MESA~\cite{borne-pons2025mesa} base model metadata, which included prompts for each grid cell in the training area. The dataset is filtered to remove invalid and low-quality samples.
 
 \subsection{Data Sources}
 \label{subsec:data_sources}
@@ -21,7 +21,7 @@ The training data consists of the MajorTOM~\cite{schulz2024majortom} Core-DEM an
 \subsection{Filtering and Selection}
 \label{subsec:filtering_and_selection}
 
-The dataset is filtered to ensure that only valid and informative samples are included in training. DEM tiles with over 20\% of missing data are excluded, as are samples with a HFI score of over 10. These values were chosen too balance the need for a large training set with the desire to focus on natural terrain features.
+The dataset is filtered to ensure that only valid and informative samples are included in training. DEM tiles with over 20\% of missing data are excluded, as are samples with a HFI score of over 10. These values were chosen to balance the need for a large training set with the desire to focus on natural terrain features.
 
 \subsection{Dataset Format}
 \label{subsec:dataset_format}
@@ -41,7 +41,7 @@ To provide spatial conditioning that captures meaningful terrain structure, feat
 \subsection{DEM-Based Terrain Feature Extraction}
 \label{subsec:dem_based_terrain_feature_extraction}
 
-In order to provide spatial conditioning that captures meaningful terrain structure, feature maps consisting of ridges, valleys and cliffs are extracted from the DEMs. Following Lochner et al. \cite{lochner2023interactive}, flow accumulation is used to identify valleys, while the Flow accumulation of the inverted DEM is analyzed to find ridges. Cliffs are detected using canny edge detection combined with slope thresholds. After extracting these features, a dropout is applied based on the strahler number to randomly drop parts of the control signal during training, which encourages the model to learn from partial conditioning and improves robustness. The Strahler number is used to bias the dropout towards downstream features, which are not as critical for maintaining the overall terrain structure, while still allowing the model to learn from the presence of upstream features.
+In order to provide spatial conditioning that captures meaningful terrain structure, feature maps consisting of ridges, valleys and cliffs are extracted from the DEMs. Following Lochner et al. \cite{lochner2023interactive}, flow accumulation is used to identify valleys, while the Flow accumulation of the inverted DEM is analyzed to find ridges. Cliffs are detected using canny edge detection combined with slope thresholds. After extracting these features, a dropout is applied based on the strahler number to randomly drop parts of the control signal during training, which encourages the model to learn from partial conditioning and improves robustness. The strahler number is used to bias the dropout towards main ridge- and valley lines, which are more important for the overall terrain structure. The resulting feature maps are combined into a three-channel tensor, with each channel representing one of the terrain features. This combined feature map is then used as conditioning input for the ControlNet branch of the model.
 
 
 \begin{figure}[htbp]
