@@ -2457,9 +2457,14 @@
     <bcf:citekey order="44" intorder="1">schulz2024majortom</bcf:citekey>
     <bcf:citekey order="45" intorder="1">higo2025terrafusion</bcf:citekey>
     <bcf:citekey order="46" intorder="1">schulz2024majortom</bcf:citekey>
-    <bcf:citekey order="47" intorder="1">gassert2023hfp100</bcf:citekey>
-    <bcf:citekey order="48" intorder="1">borne-pons2025mesa</bcf:citekey>
-    <bcf:citekey order="49" intorder="1">schulz2024majortom</bcf:citekey>
+    <bcf:citekey order="47" intorder="1">borne-pons2025mesa</bcf:citekey>
+    <bcf:citekey order="48" intorder="1">schulz2024majortom</bcf:citekey>
+    <bcf:citekey order="49" intorder="1">gassert2023hfp100</bcf:citekey>
+    <bcf:citekey order="50" intorder="1">lochner2023interactive</bcf:citekey>
+    <bcf:citekey order="51" intorder="1">borne-pons2025mesa</bcf:citekey>
+    <bcf:citekey order="52" intorder="1">hang2024efficientdiffusiontrainingminsnr</bcf:citekey>
+    <bcf:citekey order="53" intorder="1">borne-pons2025mesa</bcf:citekey>
+    <bcf:citekey order="54" intorder="1">schulz2024majortom</bcf:citekey>
   </bcf:section>
   <!-- SORTING TEMPLATES -->
   <bcf:sortingtemplate name="nty">

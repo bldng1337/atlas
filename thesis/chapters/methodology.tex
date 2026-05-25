@@ -1,7 +1,7 @@
 \chapter{Methodology}
 \label{cha:methodology}
 
-This chapter details the methodology employed to integrate ControlNet into the MESA model for steerable terrain generation. The process encompasses problem definition, dataset construction, preprocessing, terrain feature extraction, model architecture design, training strategy, loss function formulation, validation and logging procedures, and implementation specifics. Each section provides a comprehensive overview of the steps taken to achieve the research objectives, along with the rationale behind key decisions and techniques used throughout the project.
+This chapter details the methodology employed to integrate ControlNet into the MESA model for steerable terrain generation. The process encompasses problem definition, dataset construction, preprocessing, terrain feature extraction, model architecture design, training strategy, loss function formulation, validation and logging procedures, and implementation specifics. Each section provides a overview of the steps taken to achieve the research objectives.
 
 \section{Problem Definition}
 \label{sec:problem_definition}
@@ -11,18 +11,17 @@ The primary objective of this thesis is to enhance the controllability of diffus
 \section{Dataset Construction}
 \label{sec:dataset_construction}
 
-MajorTOM~\cite{schulz2024majortom} is used as the primary data source for training. It provides paired Sentinel-2 satellite imagery and digital elevation models across a wide range of geographic locations and conditions. The dataset also includes cloud masks that identify occluded regions. Text prompts are taken from the base model metadata, which included prompts for each grid cell in the training area. The dataset is filtered to remove invalid and low quality samples.
+MajorTOM~\cite{schulz2024majortom} is used as the primary data source for training. It provides paired Sentinel-2 satellite imagery and digital elevation models across a wide range of geographic locations and conditions. The dataset also includes cloud masks that identify occluded regions. Text prompts are taken from the MESA~\cite{borne-pons2025mesa} base model metadata, which included prompts for each grid cell in the training area. The dataset is filtered to remove invalid and low quality samples.
 
 \subsection{Data Sources}
 \label{subsec:data_sources}
 
-The training data consists of the MajorTOM Core-DEM and Core-S2L2A datasets. The Core-DEM dataset provides digital elevation models at 10m resolution, while the Core-S2L2A dataset contains Sentinel-2 Level 2A imagery and cloud masks. The text prompts are derived from the model metadata, which includes text prompts for each grid cell. For filtering, the Global 100m Terrestrial Human Footprint dataset~\cite{gassert2023hfp100} is used to exclude areas with significant human impact.
+The training data consists of the MajorTOM~\cite{schulz2024majortom} Core-DEM and Core-S2L2A datasets. The Core-DEM dataset provides digital elevation models at 10m resolution, while the Core-S2L2A dataset contains Sentinel-2 Level 2A imagery and cloud masks. The text prompts are derived from the model metadata, which includes text prompts for each grid cell. For filtering, the Global 100m Terrestrial Human Footprint dataset~\cite{gassert2023hfp100} is used to exclude areas with significant human impact.
 
 \subsection{Filtering and Selection}
 \label{subsec:filtering_and_selection}
 
-The Dataset is filtered to ensure that only valid and informative samples are included in training. DEM tiles with no-data values of over 0.2 are excluded, as are
-samples with a HFI score of over 10.
+The dataset is filtered to ensure that only valid and informative samples are included in training. DEM tiles with over 20\% of missing data are excluded, as are samples with a HFI score of over 10. These values were chosen too balance the need for a large training set with the desire to focus on natural terrain features.
 
 \subsection{Dataset Format}
 \label{subsec:dataset_format}
@@ -32,7 +31,7 @@ The final dataset is stored in a parquet format with columns for the Sentinel-2 
 \section{Preprocessing Pipeline}
 \label{sec:preprocessing_pipeline}
 
-The preprocessing pipeline takes raw bytes from the dataset and converts them into tensors suitable for model input. Sentinel-2 imagery is decoded from the RGB bands, resized to 768x768 via linear interpolation and normalized to the [-1,1] range. DEM tiles are decoded and normalized by dividing by the local maximum elevation to ensure values are in a consistent range. They are then resized to 768x768 and normalized to the [-1,1] range. Cloud masks are decoded and resized to 768x768 via nearest-neighbor interpolation, resulting in binary tensors where 1 indicates cloud cover and 0 indicates clear sky. Text prompts are tokenized using the CLIP tokenizer. For classifier-free guidance, a random subset of prompts is replaced with empty strings during training.
+The preprocessing pipeline takes raw bytes from the dataset and converts them into tensors suitable for model input. Sentinel-2 imagery is decoded from the RGB bands, resized to 768x768 via linear interpolation and normalized to the [-1,1] range. DEM tiles are decoded and normalized by dividing by the local, per-tile maximum elevation to ensure values are in a consistent range. They are then resized to 768x768 and normalized to the [-1,1] range. Cloud masks are decoded and resized to 768x768 via nearest-neighbor interpolation, resulting in binary tensors where 1 indicates cloud cover and 0 indicates clear sky. For classifier-free guidance, a random subset of prompts is replaced with empty strings during training.
 
 \section{Terrain Feature Map Generation}
 \label{sec:terrain_feature_map_generation}
@@ -42,27 +41,27 @@ To provide spatial conditioning that captures meaningful terrain structure, feat
 \subsection{DEM-Based Terrain Feature Extraction}
 \label{subsec:dem_based_terrain_feature_extraction}
 
-In order to provide spatial conditioning that captures meaningful terrain structure, feature maps consisting of ridges, valleys and cliffs are extracted from the DEMs. Flow accumulation is used to identify valleys, while the Flow accumulation of the inverted DEM is analyzed to find ridges. Cliffs are detected using edge detection combined with slope thresholds. After extracting these features, a dropout is applied based on the strahler number to randomly drop parts of the control signal during training, which encourages the model to learn from partial conditioning and improves robustness.
+In order to provide spatial conditioning that captures meaningful terrain structure, feature maps consisting of ridges, valleys and cliffs are extracted from the DEMs. Following Lochner et al. \cite{lochner2023interactive}, flow accumulation is used to identify valleys, while the Flow accumulation of the inverted DEM is analyzed to find ridges. Cliffs are detected using canny edge detection combined with slope thresholds. After extracting these features, a dropout is applied based on the strahler number to randomly drop parts of the control signal during training, which encourages the model to learn from partial conditioning and improves robustness. The Strahler number is used to bias the dropout towards downstream features, which are not as critical for maintaining the overall terrain structure, while still allowing the model to learn from the presence of upstream features.
 
 
 \begin{figure}[htbp]
 	\centering
 	\includegraphics[width=\linewidth]{images/feature_map_extraction.png}
-	\caption{Side-by-side comparison of an original DEM and the extracted terrain feature maps. From left to right: the input DEM rendered with a terrain colormap, valleys detected via flow accumulation (red channel), ridges detected via flow accumulation on the inverted DEM (green channel), cliffs detected via edge detection and slope thresholds (blue channel), and the combined three-channel feature map used as conditioning input to the ControlNet.}
+	\caption{Side-by-side comparison of an original DEM and the extracted terrain feature maps. From left to right: the input DEM rendered with a terrain colormap, valleys (red channel), ridges  (green channel), cliffs  (blue channel), and the combined three-channel feature map.}
 	\label{fig:feature_map_extraction}
 \end{figure}
 
 \section{Model Architecture}
 \label{sec:model_architecture}
 
-For the ControlNet model, the downblocks of the MESA~\cite{borne-pons2025mesa} U-Net are duplicated to create a separate conditioning branch. The ControlNet branch receives the sample with the conditioning feature maps added. To keep training stable the conditioning is put through a zero-initialized convolution. These samples are then passed through the cloned downblocks. The resulting residuals from the ControlNet are put through a zero-initialized convolution and added to the main U-Net residuals at the corresponding layers. The rest of the U-Net architecture remains unchanged, allowing the pretrained weights to be leveraged while still enabling spatial conditioning through the ControlNet branch.
+For the ControlNet model, the downblocks of the MESA~\cite{borne-pons2025mesa} U-Net are duplicated to create a separate conditioning branch. The ControlNet branch receives the sample with the conditioning feature maps added. To keep training stable the conditioning is put through a zero-initialized convolution. These samples are then passed through the cloned downblocks. The resulting residuals from the ControlNet are put through a zero-initialized convolution and added to the main U-Net residuals at the corresponding layers. The rest of the U-Net architecture remain frozen, allowing the pretrained weights to be leveraged while still enabling spatial conditioning through the ControlNet branch.
 
 %TODO: <IMG> Diagram of the ControlNet architecture showing the main U-Net and the duplicated downblocks for conditioning, with arrows indicating the flow of data and residual connections.
 
 \section{Training Strategy}
 \label{sec:training_strategy}
 
-The training loop samples random batches of data, applies the preprocessing pipeline, and feeds the inputs through the model to compute the loss. The VAE, text encoder, and base U-Net are frozen during training, while only the ControlNet parameters are updated. Random diffusion timesteps are sampled for each batch, and noise is added according to the scheduler. The model is trained to predict either the noise or velocity depending on the configuration. To optimize training efficiency, gradient accumulation is used to achieve an effective batch size larger than what fits in memory. Mixed precision training and gradient checkpointing are also employed to reduce memory usage and speed up training.
+The training loop samples random batches of data, applies the preprocessing pipeline, and feeds the inputs through the model to compute the loss. The VAE, text encoder, and base U-Net are frozen during training, while only the ControlNet parameters are updated. Random diffusion timesteps are sampled for each batch, and noise is added according to the scheduler. To optimize training efficiency, gradient accumulation is used to achieve an effective batch size larger than what fits in memory. Mixed precision training and gradient checkpointing are also employed to reduce memory usage and speed up training.
 
 \subsection{Noise Scheduling and Timesteps}
 \label{subsec:noise_scheduling_and_timesteps}
@@ -72,7 +71,7 @@ The training loop samples random diffusion timesteps for each batch, and noise i
 \subsection{Optimization and Efficiency}
 \label{subsec:optimization_and_efficiency}
 
-For optimization, AdamW, 8-bit Adam, or Prodigy optimizers are evaluated. Gradient accumulation is employed to achieve an effective batch size larger than what fits in memory. Mixed precision training is used to reduce memory usage and speed up training. Gradient checkpointing is also utilized to further reduce memory consumption. Additionally, torch.compile and attention backend choices are explored to optimize performance.
+For optimization, AdamW, 8-bit Adam, or Prodigy optimizers are evaluated with Prodigy ultimatly chosen. Gradient accumulation is employed to achieve an effective batch size larger than what fits in memory. Mixed precision training is used to reduce memory usage and speed up training. Gradient checkpointing is also utilized to further reduce memory consumption. Additionally, torch.compile and attention backend choices are explored to optimize performance.
 
 \section{Loss Function}
 \label{sec:loss_function}
@@ -82,12 +81,12 @@ The primary loss function used during training is the mean squared error (MSE) b
 \subsection{SNR-Weighted Loss}
 \label{subsec:snr_weighted_loss_method}
 
-SNR-weighted loss is applied to balance the learning across different noise levels. By weighting the loss according to the signal-to-noise ratio at each timestep, the model is encouraged to focus more on learning to denoise samples at noise levels where the signal is stronger, while still learning from noisier samples.
+SNR-weighted loss is applied to balance the learning across different noise levels. By weighting the loss according to the signal-to-noise ratio at each timestep, the model is encouraged to focus more on learning to denoise samples at noise levels where the signal is stronger, while still learning from noisier samples~\cite{hang2024efficientdiffusiontrainingminsnr}.
 
 \subsection{Cloud-Masked Loss Weighting}
 \label{subsec:cloud_masked_loss_weighting}
 
-Cloud masks are used to ignore the loss contribution from cloudy regions during training. This prevents the model from learning to create cloudy outputs. By focusing the loss on clear sky regions, the model can learn to generate realistic terrain features.
+Like in MESA~\cite{borne-pons2025mesa} cloud masks are used to ignore the loss contribution from cloudy regions during training. This prevents the model from learning to create cloudy outputs. By focusing the loss on clear sky regions, the model can learn to generate realistic terrain features. Loss contributions from cloudy regions are zeroed out.
 
 \section{Validation and Logging}
 \label{sec:validation_and_logging}
@@ -97,7 +96,7 @@ Validation and logging are essential components of the training process to monit
 \subsection{Validation Sampling}
 \label{subsec:validation_sampling}
 
-To monitor training progress and evaluate model performance, a fixed set of validation samples is selected from the training distribution. These samples are used to generate outputs at regular intervals during training, allowing for qualitative inspection of the generated terrain features. Quantitative metrics such as mean Intersection over Union between predicted and reference feature maps are also tracked to provide a more objective measure of performance.
+To monitor training progress and evaluate model performance, a fixed set of validation samples is selected from the training distribution for qualitative monitoring. These samples are used to generate outputs at regular intervals during training, allowing for qualitative inspection of the generated terrain features. Quantitative metrics such as mean Intersection over Union between predicted and reference feature maps are also tracked to provide a more objective measure of performance.
 
 \subsection{Training Diagnostics}
 \label{subsec:training_diagnostics}

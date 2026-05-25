@@ -1,7 +1,7 @@
 \chapter{State of Research}
 \label{cha:state_of_research}
 
-This chapter provides an overview of the current state of research in the field of landscape generation, with a particular focus on diffusion-based methods. It begins by outlining the fundamental approaches to landscape generation, including fractal generation, physical simulation, sketch-based surface creation, and terrain synthesis. The chapter then delves into recent advancements in diffusion-based terrain generation, highlighting key models such as MESA, TerraFusion, and EarthGen. By examining these approaches, this chapter aims to contextualize the research question and identify gaps in the existing literature that this thesis seeks to address.
+This chapter provides an overview of the current state of research in the field of landscape generation, with a particular focus on diffusion-based methods. It begins by outlining the fundamental approaches to landscape generation, including fractal generation, physical simulation, sketch-based surface creation, and terrain synthesis. The chapter then delves into recent advancements in diffusion-based terrain generation, highlighting key models such as MESA and TerraFusion. By examining these approaches, this chapter aims to contextualize the research question.
 
 \section{Fundamentals of Landscape Generation}
 \label{sec:landscape_fundamentals}
@@ -40,13 +40,13 @@ Physical simulation creates terrain by simulating the actual physical processes 
 
 Hydraulic erosion is the process by which water shapes terrain through the removal, transport, and deposition of soil and sediment. In computer graphics and geomorphological modeling, hydraulic erosion algorithms aim to replicate the effects of rainfall, surface runoff, and river flow.
 
-Musgrave et al.~\cite{musgrave1989synthesis} model hydraulic erosion by tracking water volume, altitude, and sediment at each vertex. Excess Water flows to neighboring vertices where the combined altitude and water volume is lower. As water moves it erodes material from the terrain if its current sediment load is below its carrying capacity. Conversely if the sediment load exceeds the carrying capacity sediment is deposited onto the terrain. This method is intuitive and can produce detailed erosion features but may be computationally intensive for large terrains.
+Musgrave et al.~\cite{musgrave1989synthesis} model hydraulic erosion by tracking water volume, altitude, and sediment at each vertex. Excess Water flows to neighboring vertices where the combined altitude and water volume is lower. As water moves it erodes material from the terrain if its current sediment load is below its carrying capacity. Conversely, if the sediment load exceeds the carrying capacity sediment is deposited onto the terrain. This method is intuitive and can produce detailed erosion features but may be computationally intensive for large terrains.
 
 Particle based hydraulic erosion methods, as introduced by Chiba et al.~\cite{chiba1998erosion}, simulate the movement and interaction of discrete water particles across the terrain surface. In this approach, each particle represents a small volume of water that moves according to local slope and gravity, carrying sediment as it travels. The erosion and deposition processes are governed by the velocity, sediment capacity of the particle, and the terrain's gradient at each step.
 
 \subsubsection{Thermal Erosion}
 
-Thermal Erosion models gradual breakdown and redistribution of terrain material. The initial model, introduced by Musgrave et al.~\cite{musgrave1989synthesis}, operates by comparing the altitude difference of each vertex with its neighboring vertices. If the slope is too steep, a fixed percentage gets transferred to the neighbor.
+Thermal Erosion models the gradual breakdown and redistribution of terrain material. The initial model, introduced by Musgrave et al.~\cite{musgrave1989synthesis}, operates by comparing the altitude difference of each vertex with its neighboring vertices. If the slope is too steep, a fixed percentage gets transferred to the neighbor.
 
 \subsection{Sketch-based Surface Creation}
 \label{subsec:sketch_based_surface_creation}
@@ -69,7 +69,7 @@ Deep learning has further advanced terrain synthesis. Conditional generative adv
 \section{Diffusion-Based Terrain Generation Methods}
 \label{sec:diffusion_terrain}
 
-Diffusion models have emerged as powerful tools for generating high-quality terrain data, leveraging large-scale datasets and advanced architectures to produce realistic heightmaps and textures. This section reviews key approaches in diffusion-based terrain generation, focusing on MESA, TerraFusion, and EarthGen, which represent the current state of the art in the field.
+Diffusion models have emerged as powerful tools for generating high-quality terrain data, leveraging large-scale datasets and advanced architectures to produce realistic heightmaps and textures. This section reviews key approaches in diffusion-based terrain generation, focusing on MESA and TerraFusion, which represent the current state of the art in the field.
 
 \subsection{MESA - Text-Driven Terrain Generation}
 \label{subsec:mesa_terrain}

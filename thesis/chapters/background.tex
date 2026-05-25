@@ -73,20 +73,26 @@ Subsequent work has introduced improvements to the basic diffusion process such 
 \subsubsection{U-Net Architecture}
 \label{subsubsec:unet_architecture}
 
-U-Net is a convolutional neural network architecture widely used as the backbone for diffusion models due to its ability to capture multi-scale features through an encoder-decoder structure with skip connections. Originally proposed by Ronneberger et al.~\cite{ronneberger2015unet} for biomedical image segmentation, U-Net has been adapted for diffusion models by Ho et al.~\cite{ho2020ddpm}.
+U-Net is a convolutional neural network architecture widely used as the backbone for diffusion models due to its ability to capture multi-scale features through an encoder-decoder structure with skip connections. Originally proposed by Ronneberger et al.~\cite{ronneberger2015unet} for biomedical image segmentation, U-Net has been adapted for diffusion models by Ho et al.~\cite{ho2020ddpm}. The U-Net architecture consists of an encoder and a decoder. The encoder progressively reduces the spatial dimensions of the input while increasing the number of feature channels capturing high-level semantic information. The decoder then upsamples the feature maps back to the original resolution to reconstruct the output. Skip connections between corresponding layers in the encoder and decoder allow the model to retain information. In diffusion models, the U-Net takes the noisy sample $\mathbf{x}_t$ and the timestep $t$ as input. The network predicts either the noise component or the denoised sample at each step of the reverse diffusion process.
 
-The U-Net architecture consists of an encoder and a decoder. The encoder progressively reduces the spatial dimensions of the input while increasing the number of feature channels capturing high-level semantic information. The decoder then upsamples the feature maps back to the original resolution to reconstruct the output. Skip connections between corresponding layers in the encoder and decoder allow the model to retain information.
-
-In diffusion models, the U-Net takes the noisy sample $\mathbf{x}_t$ and the timestep $t$ as input. The network predicts either the noise component or the denoised sample at each step of the reverse diffusion process.
-
-%TODO: <IMG> A diagram of the U-Net architecture used in diffusion models, showing the encoder, decoder, and skip connections.
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[width=\linewidth]{images/unet.png}
+	\caption{Diagram of the U-Net architecture used in diffusion models, showing the encoder, decoder, and skip connections.}
+	\label{fig:unet}
+\end{figure}
 
 \subsubsection{Latent Diffusion}
 \label{subsubsec:latent_diffusion}
 
-Latent Diffusion Models are an efficient variant of diffusion models that first compress the image into a lower-dimensional latent space before performing the diffusion process. Introduced by Rombach et al.~\cite{rombach2022stable}, Latent Diffusion Models leverage a pretrained autoencoder, typically a Variational Autoencoder~\cite{kingma2014auto}, to encode the images into a latent representation. The autoencoder consists of an encoder that maps the input image to a latent vector and a decoder that reconstructs the image from the latent vector. The diffusion model is trained to denoise latent vectors instead of images allowing for faster training and inference.
+Latent Diffusion Models are a variant of diffusion models that first compress the image into a lower-dimensional latent space before performing the diffusion process. Introduced by Rombach et al.~\cite{rombach2022stable}, Latent Diffusion Models leverage a pretrained autoencoder, typically a Variational Autoencoder~\cite{kingma2014auto}, to encode the images into a latent representation. The autoencoder consists of an encoder that maps the input image to a latent vector and a decoder that reconstructs the image from the latent vector. The diffusion model is trained to denoise latent vectors instead of images allowing for faster training and inference.
 
-%TODO: <IMG> A diagram illustrating the architecture of a Latent Diffusion Model, showing the autoencoder and the diffusion process in the latent space.
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[width=\linewidth]{images/latent_unet.png}
+	\caption{Diagram illustrating the architecture of a Latent Diffusion Model, showing the autoencoder and the diffusion process in the latent space.}
+	\label{fig:latent_unet}
+\end{figure}
 
 \section{Control Methods for Diffusion Models}
 \label{sec:control_methods}
@@ -98,14 +104,24 @@ Controlling diffusion models is crucial for applications requiring precise featu
 
 ControlNet adds additional control modalities to pretrained diffusion models by creating a trainable copy of the model's encoder layers. This copy is connected to the original network via zero-initialized convolutional layers allowing it to learn condition-specific features while preserving the weights of the pretrained model. During training, the original diffusion model remains frozen and only the ControlNet layers are updated. This approach enables strong conditioning control while preserving the capabilities of the original model albeit with computational overhead due to the network duplication~\cite{zhang2023controlnet}.
 
-%TODO: <IMG> A diagram illustrating the ControlNet architecture, showing the original diffusion model and the additional control layers.
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[width=\linewidth]{images/controlnet.png}
+	\caption{Diagram illustrating the ControlNet architecture, showing the original diffusion model and the additional control layers.}
+	\label{fig:controlnet}
+\end{figure}
 
 \subsection{T2I Adapter}
 \label{subsec:t2i_adapter}
 
-T2I-Adapter proposes a lightweight alternative to ControlNet by introducing small adapters that can be integrated into pretrained diffusion models. Instead of duplicating the entire network, T2I-Adapter uses adapters that extract features from the control conditions and progressively integrate them into the diffusion process. This design significantly reduces the number of additional parameters and computational requirements compared to ControlNet while still providing effective conditioning capabilities~\cite{mou2023t2i}.
+T2I-Adapter proposes a lightweight alternative to ControlNet by introducing small adapters that can be integrated into pretrained diffusion models. Instead of duplicating the entire network, T2I-Adapter uses adapters that extract features from the control conditions and progressively integrate them into the diffusion process This design significantly reduces the number of additional parameters and computational requirements compared to ControlNet while still providing effective conditioning capabilities~\cite{mou2023t2i}.
 
-%TODO: <IMG> A diagram illustrating the T2I-Adapter architecture, showing the original diffusion model and the adapter layers.
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[width=\linewidth]{images/t2i.png}
+	\caption{Diagram illustrating the T2I-Adapter architecture, showing the original diffusion model and the adapter layers.}
+	\label{fig:t2i_adapter}
+\end{figure}
 
 \subsection{Comparison of Control Architectures}
 \label{subsec:comp_control}
