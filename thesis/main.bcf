@@ -2465,6 +2465,8 @@
     <bcf:citekey order="52" intorder="1">hang2024efficientdiffusiontrainingminsnr</bcf:citekey>
     <bcf:citekey order="53" intorder="1">borne-pons2025mesa</bcf:citekey>
     <bcf:citekey order="54" intorder="1">schulz2024majortom</bcf:citekey>
+    <bcf:citekey order="55" intorder="1">nelder1965simplex</bcf:citekey>
+    <bcf:citekey order="56" intorder="1">villani2009optimal</bcf:citekey>
   </bcf:section>
   <!-- SORTING TEMPLATES -->
   <bcf:sortingtemplate name="nty">

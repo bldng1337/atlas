@@ -11,12 +11,12 @@ This thesis set out to bridge the gap between text-driven terrain generation and
 \section{Limitations}
 \label{sec:limitations}
 
-Despite the successful integration of spatial conditioning, several limitations were identified during the evaluation. The most prominent issue is the inverse relationship between spatial adherence and visual quality. At higher control weights, the generated terrains suffer from a severe flattening effect, losing fine-scale detail and dynamic range. Analysis revealed that this is likely caused by a mismatch in data normalization. The local [-1, 1] normalization applied to the training data conflicted with the distribution the pretrained base model was originally exposed to. Furthermore, the model exhibited varying degrees of success depending on the terrain feature. While valleys achieved moderate alignment, the model almost entirely failed to replicate cliffs. Finally, the training process exhibited instability. After an initial convergence around 10\,000 steps, the validation metrics fluctuated randomly, indicating that the model struggled to consistently generalize the learned conditioning across different geographical samples.
+Despite the successful integration of spatial conditioning, several limitations were identified during the evaluation. Even with the updated global normalization strategy, there still remains a mismatch between the data distribution of the DEM samples and the base model. Another issue is the noisy nature of mIoU scores when used on thin features like cliffs, which makes it more difficult to quantitatively assess the alignment between the generated terrain and the conditioning hints. Another limitation is the imbalance of the different control signals in the training data, which leads to difficulties in controlling certain features, such as cliffs, which are underrepresented in the dataset.
 
 \section{Future Work}
 \label{sec:future_work}
 
-The limitations encountered present avenues for future research. The priority is to resolve the data distribution mismatch by aligning the DEM normalization strategy with the original data distribution of the base model, which should mitigate the flattening effect and restore the visual fidelity of conditioned generations. Additionally, the disparity in feature alignment suggests that the cliff extraction pipeline requires refinement.
+Possible avenues for future research include exploring more sophisticated normalization techniques to better align the data distributions, as well as investigating alternative evaluation metrics that are more robust to thin features. Additionally, expanding the training dataset to include a more balanced representation of different geomorphological features could improve the controllability of underrepresented features.
 
 \section{Closing Remarks}
 \label{sec:closing_remarks}
