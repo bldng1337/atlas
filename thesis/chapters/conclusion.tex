@@ -11,12 +11,12 @@ This thesis set out to bridge the gap between text-driven terrain generation and
 \section{Limitations}
 \label{sec:limitations}
 
-Despite the successful integration of spatial conditioning, several limitations were identified during the evaluation. Even with the updated global normalization strategy, there still remains a mismatch between the data distribution of the DEM samples and the base model. Another issue is the noisy nature of mIoU scores when used on thin features like cliffs, which makes it more difficult to quantitatively assess the alignment between the generated terrain and the conditioning hints. Another limitation is the imbalance of the different control signals in the training data, which leads to difficulties in controlling certain features, such as cliffs, which are underrepresented in the dataset.
+Despite the successful integration of spatial conditioning, several limitations were identified during the evaluation. Even with the updated global normalization strategy, a mismatch remains between the DEM sample distribution and the base model's expected input distribution. Another issue is the noisy nature of mIoU scores for thin features like cliffs, which makes quantitative assessment of alignment with the conditioning hints difficult. A further limitation is the imbalance of control signals in the training data, which makes it difficult to control underrepresented features such as cliffs.
 
 \section{Future Work}
 \label{sec:future_work}
 
-Possible avenues for future research include exploring more sophisticated normalization techniques to better align the data distributions, as well as investigating alternative evaluation metrics that are more robust to thin features. Additionally, expanding the training dataset to include a more balanced representation of different geomorphological features could improve the controllability of underrepresented features.
+Possible avenues for future research include exploring better normalization techniques to better align the data distributions and investigating alternative evaluation metrics that are more robust to thin features. Additionally, expanding the training dataset to include a more balanced representation of different features could improve controllability.
 
 \section{Closing Remarks}
 \label{sec:closing_remarks}
