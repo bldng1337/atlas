@@ -40,6 +40,8 @@ dependencies = [
     "triton-windows>=3.2.0 ; sys_platform == 'win32'",
     "prodigyopt>=1.1.2",
     "psutil>=7.1.1",
+    "trimesh>=4.12.2",
+    "scikit-learn>=1.6.1",
 ]
 
 [tool.uv.sources]
