@@ -9,6 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+thesis/main.pdf
+data/
 weights/
 outputs/
 logs/
