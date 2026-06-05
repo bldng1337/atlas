@@ -1,23 +1,23 @@
 \chapter{State of Research}
 \label{cha:state_of_research}
 
-This chapter provides an overview of the current state of research in the field of landscape generation, with a particular focus on diffusion-based methods. It begins by outlining the fundamental approaches to landscape generation, including fractal generation, physical simulation, sketch-based surface creation, and terrain synthesis. The chapter then delves into recent advancements in diffusion-based terrain generation, highlighting key models such as MESA and TerraFusion. By examining these approaches, this chapter aims to contextualize the research question.
+This chapter provides an overview of the current state of research in the field of landscape generation, with a particular focus on diffusion-based methods. It begins by outlining the fundamental approaches to landscape generation, including fractal generation, physical simulation, sketch-based surface creation, and terrain synthesis. The chapter then delves into recent advancements in diffusion-based terrain generation, highlighting key models such as MESA and TerraFusion. By examining these approaches, this chapter aims to contextualize the research question defined in Section~\ref{sec:researchquestion}.
 
 \section{Fundamentals of Landscape Generation}
 \label{sec:landscape_fundamentals}
 
-The generation of landscapes without geological data as a direct basis falls, according to Mattia Natali~\cite{Natali2013}, within the field of Data-Free Geomodelling. There are four major approaches: fractal landscape generation, physical simulation, sketch-based surface creation, and terrain synthesis.
+The generation of landscapes without geological data as a direct basis falls, according to Natali~\cite{Natali2013}, within the field of Data-Free Geomodelling. There are four major approaches: fractal landscape generation, physical simulation, sketch-based surface creation, and terrain synthesis.
 
 \subsection{Fractal Generation}
 \label{subsec:fractal_generation}
 
-Fractal landscape generation uses procedural algorithms to replicate the appearance of realistic landscapes. These methods are grounded in the observation that many natural terrains exhibit fractal properties, such as self-similarity and statistical roughness across scales. When a portion of a self-similar object is examined under increasing magnification, the same level of detail and irregularity appears regardless of scale.~\cite{fournier1982computer}
+Fractal landscape generation uses procedural algorithms to replicate the appearance of realistic landscapes. These methods are grounded in the observation that many natural terrains exhibit fractal properties, such as self-similarity and statistical roughness across scales. When a portion of a self-similar object is examined under increasing magnification, the same level of detail and irregularity appears regardless of scale~\cite{fournier1982computer}.
 
-\subsubsection{Fractal Brownian Motion - fBm}
+\subsubsection{Fractional Brownian Motion}
 
-Fractional Brownian motion represents a foundational stochastic process for generating natural-looking terrain. Introduced by Mandelbrot and Van Ness~\cite{mandelbrot1968fractional} fBm is characterized by its ability to produce continuous noise with a controllable degree of roughness. The Hurst exponent $H$ governs the fractal dimension and smoothness of the resulting terrain, allowing for the simulation of a wide range of natural surfaces from rugged mountains to rolling hills.
+Fractional Brownian motion~(fBm) represents a foundational stochastic process for generating natural-looking terrain. Introduced by Mandelbrot and Van Ness~\cite{mandelbrot1968fractional}, fBm is characterized by its ability to produce continuous noise with a controllable degree of roughness. The Hurst exponent $H$ governs the fractal dimension and smoothness of the resulting terrain, allowing for the simulation of a wide range of natural surfaces, from rugged mountains to rolling hills.
 
-Fournier et al.~\cite{fournier1982computer} first demonstrated the use of fBm in computer graphics for terrain modeling, providing an efficient approximation of the original algorithm.
+Fournier et al.~\cite{fournier1982computer} first demonstrated the use of fBm in computer graphics for terrain modeling, providing an efficient approximation of the original fBm formulation.
 
 Recent research also explores hybrid approaches combining fBm with neural networks or other constraints to improve semantic control and geographic realism~\cite{Cuadros2025TerrainGU}.
 
@@ -29,54 +29,54 @@ Perlin noise is widely used in computer graphics for heightmap generation due to
 
 \subsubsection{Limitations of Classical Fractal Approaches}
 
-However, while these algorithms excel at capturing the visual complexity of nature, they lack semantic control, geographic realism and diversity without extensive manual parameter tuning. These constraints hinder their ability to generate terrains that align with specific user intent or real world geological features.
+While these algorithms excel at capturing the visual complexity of nature, they lack semantic control, geographic realism, and diversity without extensive manual parameter tuning. These constraints hinder their ability to generate terrains that align with specific user intent or real-world geological features.
 
 \subsection{Physical Simulation}
 \label{subsec:physical_simulation}
 
-Physical simulation creates terrain by simulating the actual physical processes responsible for shaping landscapes. Unlike fractal approaches, physical simulation algorithms attempt to recreate the effects of natural phenomena such as erosion, sediment transport, water flow and weathering. By simulating these processes the result consists of geographically realistic features like river networks, valleys, ridges, and gullies closely resembling terrain in the real world.
+Physical simulation creates terrain by simulating the actual physical processes responsible for shaping landscapes. Unlike fractal approaches, physical simulation algorithms attempt to recreate the effects of natural phenomena such as erosion, sediment transport, water flow, and weathering. Simulating these processes results in geographically realistic features like river networks, valleys, ridges, and gullies, closely resembling terrain in the real world.
 
 \subsubsection{Hydraulic Erosion}
 
 Hydraulic erosion is the process by which water shapes terrain through the removal, transport, and deposition of soil and sediment. In computer graphics and geomorphological modeling, hydraulic erosion algorithms aim to replicate the effects of rainfall, surface runoff, and river flow.
 
-Musgrave et al.~\cite{musgrave1989synthesis} model hydraulic erosion by tracking water volume, altitude, and sediment at each vertex. Excess water flows to neighboring vertices where the combined altitude and water volume is lower. As water moves it erodes material from the terrain if its current sediment load is below its carrying capacity. Conversely, if the sediment load exceeds the carrying capacity sediment is deposited onto the terrain. This method is intuitive and can produce detailed erosion features but may be computationally intensive for large terrains.
+Musgrave et al.~\cite{musgrave1989synthesis} model hydraulic erosion by tracking water volume, altitude, and sediment at each vertex. Excess water flows to neighboring vertices where the combined altitude and water volume is lower. As water moves, it erodes material from the terrain if its current sediment load is below its carrying capacity. Conversely, if the sediment load exceeds the carrying capacity, sediment is deposited onto the terrain. This method is intuitive and can produce detailed erosion features, but may be computationally intensive for large terrains.
 
-Particle-based hydraulic erosion methods, as introduced by Chiba et al.~\cite{chiba1998erosion}, simulate the movement and interaction of discrete water particles across the terrain surface. In this approach, each particle represents a small volume of water that moves according to local slope and gravity, carrying sediment as it travels. The erosion and deposition processes are governed by the velocity, sediment capacity of the particle, and the terrain's gradient at each step.
+Particle-based hydraulic erosion methods, as introduced by Chiba et al.~\cite{chiba1998erosion}, simulate the movement and interaction of discrete water particles across the terrain surface. In this approach, each particle represents a small volume of water that moves according to local slope and gravity, carrying sediment as it travels. The erosion and deposition processes are governed by the velocity and sediment capacity of the particle, as well as the terrain's gradient at each step.
 
 \subsubsection{Thermal Erosion}
 
-Thermal Erosion models the gradual breakdown and redistribution of terrain material. The initial model, introduced by Musgrave et al.~\cite{musgrave1989synthesis}, operates by comparing the altitude difference of each vertex with its neighboring vertices. If the slope is too steep, a fixed percentage gets transferred to the neighbor.
+Thermal erosion models the gradual breakdown and redistribution of terrain material. The initial model, introduced by Musgrave et al.~\cite{musgrave1989synthesis}, operates by comparing the altitude difference of each vertex with its neighboring vertices. If the slope is too steep, a fixed percentage is transferred to neighboring vertices.
 
 \subsection{Sketch-based Surface Creation}
 \label{subsec:sketch_based_surface_creation}
 
-Sketch-based surface creation allows users to intuitively design terrain features through direct manipulation or drawing. This approach emphasizes user control and creativity enabling the rapid prototyping of landscapes. Users can sketch contours, elevation profiles, or specific features like mountains and valleys which are then interpreted by the system to generate a corresponding 3D terrain model. Various algorithms can be employed to convert these sketches into heightmaps or mesh representations often incorporating interpolation, smoothing, and procedural refinement to enhance realism~\cite{Gain2009}.
+Sketch-based surface creation allows users to intuitively design terrain features through direct manipulation or drawing. This approach emphasizes user control and creativity, enabling the rapid prototyping of landscapes. Users can sketch contours, elevation profiles, or specific features like mountains and valleys, which are then interpreted by the system to generate corresponding 3D terrain models. Various algorithms can be employed to convert these sketches into heightmaps or mesh representations, often incorporating interpolation, smoothing, and procedural refinement to enhance realism~\cite{Gain2009}.
 
 \subsection{Terrain Synthesis}
 \label{subsec:terrain_synthesis}
 
-Terrain synthesis uses existing real-world examples to generate new landscapes. The core idea is to extract characteristic patterns, features and structures from existing terrain data and recombine them to synthesize geologically plausible landscapes. In this approach the statistical properties of the source data are analyzed and used to synthesize new elevation models. This method can be efficient and enables the generation of landscapes that resemble the training data. However, the diversity of the resulting landscapes is limited by the characteristics of the original datasets.
+Terrain synthesis uses existing real-world examples to generate new landscapes. The core idea is to extract characteristic patterns, features, and structures from existing terrain data and recombine them to synthesize geologically plausible landscapes. In this approach, the statistical properties of the source data are analyzed and used to synthesize new elevation models. This method can be efficient and enables the generation of landscapes that resemble the training data. However, the diversity of the resulting landscapes is limited by the characteristics of the original datasets.
 
-\subsubsection{Texture Based Approaches}
+\subsubsection{Texture-Based Approaches}
 
-Early terrain synthesis techniques were inspired by texture synthesis in computer graphics. These methods assemble new terrains by stitching together small patches or tiles from real-world DEMs, ensuring that local features such as ridges, valleys, and drainage patterns are preserved. Feature extraction and matching algorithms are used to guide the placement and blending of patches, resulting in seamless and realistic terrain mosaics~\cite{Gain2006, zhou2007terrain}.
+Early terrain synthesis techniques were inspired by texture synthesis in computer graphics. These methods assemble new terrains by stitching together small patches or tiles from real-world DEMs, ensuring that local features such as ridges, valleys, and drainage patterns are preserved. Feature extraction and matching algorithms are used to guide the placement and blending of patches, resulting in seamless and realistic terrain mosaics~\cite{zhou2007terrain}.
 
-\subsubsection{Deep Learning Based Synthesis}
+\subsubsection{Deep-Learning-Based Synthesis}
 
-Deep learning has further advanced terrain synthesis. Conditional generative adversarial networks (GANs) and related architectures can learn complex mappings from sketches, semantic maps, or other control signals to realistic terrain heightmaps. By training on large datasets of real-world terrain, these models can generate novel landscapes that exhibit both global coherence and fine-scale detail, while enabling intuitive user control through sketch-based or example-based authoring interfaces~\cite{Guerin2017}.
+Deep learning has further advanced terrain synthesis. Conditional GANs and related architectures can learn complex mappings from sketches, semantic maps, or other control signals to realistic terrain heightmaps. By training on large datasets of real-world terrain, these models can generate novel landscapes that exhibit both global coherence and fine-scale detail, while enabling intuitive user control through sketch-based or example-based authoring interfaces~\cite{Guerin2017}.
 
 \section{Diffusion-Based Terrain Generation Methods}
 \label{sec:diffusion_terrain}
 
-Diffusion models have emerged as powerful tools for generating high-quality terrain data, leveraging large-scale datasets and advanced architectures to produce realistic heightmaps and textures. This section reviews key approaches in diffusion-based terrain generation, focusing on MESA and TerraFusion, which represent the current state of the art in the field.
+Diffusion models have emerged as powerful tools for generating high-quality terrain data, leveraging large-scale datasets and advanced architectures to produce realistic heightmaps and textures. This section reviews key approaches in diffusion-based terrain generation, focusing on MESA and TerraFusion.
 
-\subsection{MESA - Text-Driven Terrain Generation}
+\subsection{MESA -- Text-Driven Terrain Generation}
 \label{subsec:mesa_terrain}
 
-MESA~\cite{borne-pons2025mesa} modifies Stable Diffusion 2.1~\cite{stabilityai2022stablediffusion} to simultaneously generate heightmaps and color maps from text prompts. To generate two modalities while keeping them aligned MESA modifies the U-Net architecture to have separate output heads for heightmaps and color maps, while sharing a common backbone. The model is trained on a large dataset of paired heightmaps and satellite images derived from the MajorTOM~\cite{schulz2024majortom} dataset while masking out clouds to enable cloud-free generations. MESA demonstrates the ability to generate realistic heightmaps from text descriptions, but its reliance on text-based control limits the precision of spatial features in the generated terrain.
+MESA~\cite{borne-pons2025mesa} modifies Stable Diffusion 2.1~\cite{stabilityai2022stablediffusion} to simultaneously generate heightmaps and color maps from text prompts. To generate two modalities while keeping them aligned, MESA modifies the U-Net architecture to have separate output heads for heightmaps and color maps, while sharing a common backbone. The model is trained on a large dataset of paired heightmaps and satellite images derived from the MajorTOM~\cite{schulz2024majortom} dataset. The loss function includes a term for masking out the loss for cloud obscured pixels to enable cloud-free generations. MESA demonstrates the ability to generate realistic heightmaps from text descriptions, but its reliance on text-based control limits the precision of spatial features in the generated terrain.
 
-\subsection{TerraFusion - Joint Geometry and Texture Generation}
+\subsection{TerraFusion -- Joint Geometry and Texture Generation}
 \label{subsec:terra_fusion}
 
-TerraFusion~\cite{higo2025terrafusion} presents a unified approach for generating both heightmaps and textures using a latent diffusion model. Unlike MESA, which uses separate output heads for each modality, TerraFusion employs a single latent diffusion framework to jointly synthesize both heightmap and texture. To control the generation process TerraFusion utilizes a ControlNet architecture to condition on sketches. This allows for more precise spatial control over the generated terrain features compared to MESA's text-based approach but falls short in the ability to control the terrain type.
+TerraFusion~\cite{higo2025terrafusion} presents a unified approach for generating both heightmaps and textures using a latent diffusion model. Unlike MESA, which uses separate output heads for each modality, TerraFusion employs a single latent diffusion framework to jointly synthesize both heightmaps and textures. To control the generation process, TerraFusion utilizes a ControlNet architecture to condition generation on input sketches. This allows for more precise spatial control over the generated terrain features compared to MESA's text-based approach, but lacks the ability to control the biome.

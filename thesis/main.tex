@@ -9,7 +9,7 @@
 \RequirePackage[utf8]{inputenc} % Remove when using lualatex or xelatex!
 \RequirePackage{hgbpdfa}				% Remove if NO PDF/A output is desired
 
-\documentclass[type=master,theme=default,language=english,titlelanguage=english,smartquotes=true]{hgbthesis}
+\documentclass[type=bachelor,theme=default,language=english,titlelanguage=english,smartquotes=true]{hgbthesis}
 % Supported options in [..]:
 %    Type of work (type=): master (default), bachelor, diploma, phd, internship
 %    Title page theme (theme=): default (default), fhooe24
@@ -33,7 +33,7 @@
 % Title page entries
 %%%-----------------------------------------------------------------------------
 
-\title{How can the generation of height maps by MESA be controlled to ensure realistic and geographically accurate landscapes?}
+\title{How can the generation of heightmaps by MESA be controlled to ensure realistic and geographically accurate landscapes?}
 % \subtitle{A Fundamental Introduction}
 \author{Christian Gärtner}
 
@@ -65,7 +65,7 @@
 %%%-----------------------------------------------------------------------------
 \mainmatter                                    % Main part (arabic page numbers)
 %%%-----------------------------------------------------------------------------
-
+\include{chapters/introduction}
 \include{chapters/background}
 \include{chapters/research}
 \include{chapters/methodology}
@@ -77,9 +77,9 @@
 %%%-----------------------------------------------------------------------------
 
 \include{back/appendix_a} % Technical supplements
-\include{back/appendix_b} % Contents of the CD-ROM/DVD
-\include{back/appendix_c} % Chronological list of changes
-\include{back/appendix_d} % Source text of this document
+% \include{back/appendix_b} % Contents of the CD-ROM/DVD
+% \include{back/appendix_c} % Chronological list of changes
+% \include{back/appendix_d} % Source text of this document
 
 %%%-----------------------------------------------------------------------------
 \backmatter                           % Back part (bibliography, glossary, etc.)
@@ -91,7 +91,7 @@
 % Special page for checking print size
 %%%-----------------------------------------------------------------------------
 
-\include{back/printbox}
+% \include{back/printbox}
 
 %%%-----------------------------------------------------------------------------
 \end{document}

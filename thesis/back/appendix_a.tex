@@ -1,5 +1,16 @@
-\chapter{Technical Details}
-\label{app:TechnicalDetails}
+\chapter{Source Code and Reproducibility}
+\label{app:source_code}
 
+The source code for the implementation of the ControlNet architecture within the MESA latent diffusion model, as well as the training pipeline and evaluation scripts, is available in the following GitHub repository: \url{https://github.com/bldng1337/atlas}. The repository includes the following key components:
 
+\begin{itemize}
+	\item \texttt{dataset/}: This directory contains scripts for dataset preprocessing, including feature map generation, prompt addition, and data collection.
+	\item \texttt{app.py}: A Gradio interface for interactive testing of the trained model.
+	\item \texttt{dataprep.py}: Functions for loading the dataset and preparing the samples for training, including normalization.
+	\item \texttt{models.py}: The definition of the ControlNet architecture and its integration with MESA.
+	\item \texttt{pipeline\_terrain.py}: The inference pipeline for the trained model.
+	\item \texttt{train\_controlnet.py}: The training script for fine-tuning the ControlNet.
+	\item \texttt{train\_utils.py}: Utility functions for training, including evaluation metrics and logging.
+\end{itemize}
 
+The implementation is compatible with Python 3.9 and uses the \texttt{uv} package for dependency management. There is a \texttt{pyproject.toml} file included in the repository that specifies the required dependencies for running the code. Instructions for setting up the environment and running the training and evaluation scripts are provided in the repository's README file.

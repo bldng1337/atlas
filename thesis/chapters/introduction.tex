@@ -1,0 +1,33 @@
+\chapter{Introduction}
+\label{cha:introduction}
+
+This chapter introduces the motivation, problem statement, and research question guiding this thesis.
+
+\section{Motivation}
+\label{sec:motivation}
+
+Generating realistic landscapes is a crucial aspect of various applications, including video games, simulations, and virtual reality. However, achieving geographic accuracy and realism in heightmap generation, while retaining control over the shape and biome of the landscape, can be challenging. The diffusion model MESA~(Modeling of Elevation and Surface Appearance)~\cite{borne-pons2025mesa} is able to generate heightmaps following a text prompt, but purely textual control makes it difficult to achieve specific geological features or shapes. This thesis aims to explore how additional control signals can enhance the controllability and accuracy of heightmap generation using MESA.
+
+\section{Problem Statement}
+\label{sec:problemstatement}
+
+The primary problem addressed in this thesis is the lack of control over specific geological features or shapes in the generation of heightmaps by MESA. The current text-based guidance is insufficient to achieve control over the shape of the generated terrain. Therefore, there is a need to investigate how additional control signals, such as ridge, valley, and cliff lines extracted from the DEM samples, can be integrated into the MESA model to improve the controllability of heightmap generation while maintaining its accuracy. This thesis will explore the integration of ControlNet, a neural network architecture for adding spatial conditioning to diffusion models, as a potential solution to this problem.
+
+\section{Research Question}
+\label{sec:researchquestion}
+
+The central research question of this thesis is:
+\textit{How can the generation of heightmaps by MESA be controlled to ensure realistic and geographically accurate landscapes?}
+This question will guide the investigation into the integration of ControlNet, a neural network architecture for adding spatial conditioning to diffusion models, and the evaluation of its effectiveness in improving the controllability of heightmap generation while maintaining the generation quality of the base model.
+
+\section{Thesis Structure}
+\label{sec:thesisstructure}
+
+This thesis is structured as follows:
+\begin{itemize}
+	\item Chapter~\ref{cha:theoretical} provides the theoretical background on terrain generation, diffusion models, and control methods.
+	\item Chapter~\ref{cha:state_of_research} reviews the current state of research in landscape generation and diffusion-based methods.
+	\item Chapter~\ref{cha:methodology} outlines the research methodology, including dataset preprocessing, training procedures, and evaluation metrics.
+	\item Chapter~\ref{cha:experiments} presents the experimental results, including the quantitative and qualitative evaluations.
+	\item Chapter~\ref{cha:conclusion} concludes the thesis with a summary of findings and suggestions for future research.
+\end{itemize}
